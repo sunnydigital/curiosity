@@ -16,16 +16,23 @@ export class OllamaProvider extends BaseLLMProvider {
     this.baseUrl = baseUrl.replace(/\/$/, "");
   }
 
+  private formatMessages(messages: LLMCompletionRequest["messages"]) {
+    return messages.map((m) => {
+      const msg: any = { role: m.role, content: m.content };
+      if (m.image) {
+        msg.images = [m.image.base64];
+      }
+      return msg;
+    });
+  }
+
   async complete(req: LLMCompletionRequest): Promise<LLMCompletionResponse> {
     const response = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: req.model,
-        messages: req.messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
+        messages: this.formatMessages(req.messages),
         stream: false,
         options: {
           temperature: req.temperature ?? 0.7,
@@ -62,10 +69,7 @@ export class OllamaProvider extends BaseLLMProvider {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: req.model,
-        messages: req.messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
+        messages: this.formatMessages(req.messages),
         stream: true,
         options: {
           temperature: req.temperature ?? 0.7,

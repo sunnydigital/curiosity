@@ -102,6 +102,7 @@ export interface Settings {
 export interface LLMMessage {
   role: "system" | "user" | "assistant";
   content: string;
+  image?: { base64: string; mimeType: string };
 }
 
 export interface LLMCompletionRequest {

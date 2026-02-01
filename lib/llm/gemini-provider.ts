@@ -17,6 +17,15 @@ export class GeminiProvider extends BaseLLMProvider {
     this.client = new GoogleGenerativeAI(apiKey);
   }
 
+  private buildParts(m: { content: string; image?: { base64: string; mimeType: string } }) {
+    const parts: any[] = [];
+    if (m.image) {
+      parts.push({ inlineData: { mimeType: m.image.mimeType, data: m.image.base64 } });
+    }
+    parts.push({ text: m.content });
+    return parts;
+  }
+
   async complete(req: LLMCompletionRequest): Promise<LLMCompletionResponse> {
     const model = this.client.getGenerativeModel({ model: req.model });
     const systemMessage = req.messages.find((m) => m.role === "system");
@@ -24,7 +33,7 @@ export class GeminiProvider extends BaseLLMProvider {
 
     const history = nonSystemMessages.slice(0, -1).map((m) => ({
       role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
+      parts: this.buildParts(m),
     }));
 
     const chat = model.startChat({
@@ -35,7 +44,7 @@ export class GeminiProvider extends BaseLLMProvider {
     });
 
     const lastMessage = nonSystemMessages[nonSystemMessages.length - 1];
-    const result = await chat.sendMessage(lastMessage.content);
+    const result = await chat.sendMessage(this.buildParts(lastMessage));
     const text = result.response.text();
 
     return {
@@ -54,7 +63,7 @@ export class GeminiProvider extends BaseLLMProvider {
 
     const history = nonSystemMessages.slice(0, -1).map((m) => ({
       role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
+      parts: this.buildParts(m),
     }));
 
     const chat = model.startChat({
@@ -65,7 +74,7 @@ export class GeminiProvider extends BaseLLMProvider {
     });
 
     const lastMessage = nonSystemMessages[nonSystemMessages.length - 1];
-    const result = await chat.sendMessageStream(lastMessage.content);
+    const result = await chat.sendMessageStream(this.buildParts(lastMessage));
 
     for await (const chunk of result.stream) {
       const text = chunk.text();

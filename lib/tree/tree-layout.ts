@@ -181,8 +181,8 @@ export function computeTreeLayout(
             source: message.id,
             target: child.id,
             type: "chatEdge",
-            sourceHandle: "source-right",
-            targetHandle: "left",
+            sourceHandle: "bottom",
+            targetHandle: "top",
             data: { isTrunk: false },
           });
 
@@ -202,8 +202,8 @@ export function computeTreeLayout(
             source: message.id,
             target: child.id,
             type: "chatEdge",
-            sourceHandle: "source-left",
-            targetHandle: "right",
+            sourceHandle: "bottom",
+            targetHandle: "top",
             data: { isTrunk: false },
           });
 

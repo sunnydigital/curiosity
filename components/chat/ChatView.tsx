@@ -1,17 +1,41 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useChat } from "@/hooks/useChat";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
-import { TextSelectionToolbar } from "./TextSelectionToolbar";
+import { TextSelectionToolbar, loadShortcuts } from "./TextSelectionToolbar";
 import { ChatActions } from "./ChatActions";
 import { TreePanel } from "@/components/tree/TreePanel";
 import { MemoryPanel } from "@/components/memory/MemoryPanel";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 import type { Message } from "@/types";
+
+// Known Ollama vision model base names (from ollama.com/search?c=vision)
+const OLLAMA_VISION_MODELS = [
+  "llava", "llava-llama3", "llava-phi3", "bakllava", "moondream",
+  "minicpm-v", "llama3.2-vision", "llama4", "gemma3",
+  "granite3.2-vision", "qwen2.5vl", "qwen3-vl",
+  "mistral-small3.1", "mistral-small3.2", "ministral-3",
+  "deepseek-ocr", "translategemma", "devstral-small-2",
+];
+
+function modelSupportsImages(provider: string, model: string): boolean {
+  // Anthropic and Gemini: all models support vision
+  if (provider === "anthropic" || provider === "gemini") return true;
+  // OpenAI: GPT-4o, GPT-4-turbo, and o-series support vision; GPT-3.5 does not
+  if (provider === "openai") {
+    return /gpt-4o|gpt-4-turbo|o1|o3|o4/i.test(model);
+  }
+  // Ollama: check base name (before the colon/tag) against known vision models
+  if (provider === "ollama") {
+    const baseName = model.split(":")[0].toLowerCase();
+    return OLLAMA_VISION_MODELS.some((v) => baseName === v || baseName.startsWith(v + "-"));
+  }
+  return false;
+}
 
 interface ChatViewProps {
   chatId: string;
@@ -33,9 +57,12 @@ export function ChatView({ chatId }: ChatViewProps) {
   } = useChat({ chatId });
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const selectionRangeRef = useRef<Range | null>(null);
   const [showTree, setShowTree] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
   const [chatTitle, setChatTitle] = useState("New Chat");
+  const [activeModel, setActiveModel] = useState("");
+  const [activeProvider, setActiveProvider] = useState("");
   const [selectionState, setSelectionState] = useState<{
     messageId: string;
     selectedText: string;
@@ -43,12 +70,27 @@ export function ChatView({ chatId }: ChatViewProps) {
     charEnd: number;
     position: { x: number; y: number };
   } | null>(null);
+  const [shortcuts, setShortcuts] = useState(() => loadShortcuts());
+
+  // Re-sync shortcuts from localStorage when toolbar opens (picks up adds/removes)
+  useEffect(() => {
+    if (selectionState) {
+      setShortcuts(loadShortcuts());
+    }
+  }, [selectionState]);
 
   useEffect(() => {
     fetchMessages();
     fetch(`/api/chat/${chatId}`)
       .then((r) => r.json())
       .then((data) => { if (data?.title) setChatTitle(data.title); })
+      .catch(() => {});
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.activeModel) setActiveModel(data.activeModel);
+        if (data?.activeProvider) setActiveProvider(data.activeProvider);
+      })
       .catch(() => {});
   }, [fetchMessages, chatId]);
 
@@ -115,7 +157,10 @@ export function ChatView({ chatId }: ChatViewProps) {
     }) => {
       const selection = window.getSelection();
       if (!selection || selection.rangeCount === 0) return;
-      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      // Save a clone of the Range so we can restore it after re-render
+      selectionRangeRef.current = range.cloneRange();
       setSelectionState({
         ...params,
         position: {
@@ -126,6 +171,22 @@ export function ChatView({ chatId }: ChatViewProps) {
     },
     []
   );
+
+  // Restore the browser selection after re-render so the highlight persists
+  // (React re-rendering inline elements like <strong> or KaTeX spans can clear it)
+  useLayoutEffect(() => {
+    if (selectionState && selectionRangeRef.current) {
+      const selection = window.getSelection();
+      if (selection) {
+        try {
+          selection.removeAllRanges();
+          selection.addRange(selectionRangeRef.current);
+        } catch {
+          // Range nodes may have been detached; ignore
+        }
+      }
+    }
+  }, [selectionState]);
 
   const handleBranch = async (
     type: "learn_more" | "dont_understand" | "specifics" | "custom",
@@ -164,7 +225,8 @@ export function ChatView({ chatId }: ChatViewProps) {
 
   // Keyboard shortcuts for branching
   useKeyboardShortcuts({
-    onBranch: (type, selectedText, messageId, charStart, charEnd) => {
+    shortcuts,
+    onBranch: (type, selectedText, messageId, charStart, charEnd, customPrompt) => {
       setSelectionState(null);
       // Directly create branch
       fetch(`/api/chat/${chatId}/branch`, {
@@ -177,6 +239,7 @@ export function ChatView({ chatId }: ChatViewProps) {
           charStart,
           charEnd,
           branchType: type,
+          customPrompt,
         }),
       })
         .then((r) => r.json().catch(() => null))
@@ -332,12 +395,13 @@ export function ChatView({ chatId }: ChatViewProps) {
         )}
 
         <MessageInput
-          onSend={(content) => {
+          onSend={(content, image) => {
             const lastMessage = displayMessages[displayMessages.length - 1];
-            sendMessage(content, lastMessage?.id || null);
+            sendMessage(content, lastMessage?.id || null, image);
           }}
           onStop={stopStreaming}
           isLoading={isLoading}
+          supportsImages={modelSupportsImages(activeProvider, activeModel)}
         />
       </div>
 

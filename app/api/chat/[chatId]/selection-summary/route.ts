@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getMessage } from "@/db/queries/messages";
 import { getSettings } from "@/db/queries/settings";
 import { getPreviewProvider } from "@/lib/llm/provider-registry";
 import { SELECTION_SUMMARY_PROMPT } from "@/lib/constants";
@@ -9,23 +8,22 @@ export async function POST(
   { params }: { params: Promise<{ chatId: string }> }
 ) {
   await params;
-  const { messageId, charStart, charEnd, selectedText } = await request.json();
 
-  // Try to extract raw source text from the stored message using offsets.
-  // This preserves LaTeX and other markup that gets lost in DOM selection.
-  let textToSummarize = selectedText;
-
-  if (messageId) {
-    const message = getMessage(messageId);
-    if (message && typeof charStart === "number" && typeof charEnd === "number") {
-      const raw = message.content.slice(charStart, charEnd);
-      if (raw.trim()) {
-        textToSummarize = raw;
-      }
-    }
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  if (!textToSummarize || typeof textToSummarize !== "string") {
+  const { selectedText } = body ?? {};
+
+  // Use the DOM-selected text directly. Previously we tried to map DOM offsets
+  // back to the raw markdown source, but rendered text (bold, LaTeX, etc.) has
+  // different lengths than the raw markup, so the offsets were wrong.
+  const textToSummarize = selectedText;
+
+  if (!textToSummarize || typeof textToSummarize !== "string" || !textToSummarize.trim()) {
     return NextResponse.json({ error: "No text to summarize" }, { status: 400 });
   }
 

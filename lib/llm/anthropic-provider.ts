@@ -17,6 +17,29 @@ export class AnthropicProvider extends BaseLLMProvider {
     this.client = new Anthropic({ apiKey });
   }
 
+  private formatMessage(m: { role: string; content: string; image?: { base64: string; mimeType: string } }) {
+    if (m.image) {
+      return {
+        role: m.role as "user" | "assistant",
+        content: [
+          {
+            type: "image" as const,
+            source: {
+              type: "base64" as const,
+              media_type: m.image.mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+              data: m.image.base64,
+            },
+          },
+          { type: "text" as const, text: m.content },
+        ],
+      };
+    }
+    return {
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    };
+  }
+
   async complete(req: LLMCompletionRequest): Promise<LLMCompletionResponse> {
     const systemMessage = req.messages.find((m) => m.role === "system");
     const nonSystemMessages = req.messages.filter((m) => m.role !== "system");
@@ -25,10 +48,7 @@ export class AnthropicProvider extends BaseLLMProvider {
       model: req.model,
       max_tokens: req.maxTokens || 4096,
       system: systemMessage?.content,
-      messages: nonSystemMessages.map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      })),
+      messages: nonSystemMessages.map((m) => this.formatMessage(m)) as any,
       temperature: req.temperature ?? 0.7,
     });
 
@@ -58,10 +78,7 @@ export class AnthropicProvider extends BaseLLMProvider {
       model: req.model,
       max_tokens: req.maxTokens || 4096,
       system: systemMessage?.content,
-      messages: nonSystemMessages.map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      })),
+      messages: nonSystemMessages.map((m) => this.formatMessage(m)) as any,
       temperature: req.temperature ?? 0.7,
     });
 

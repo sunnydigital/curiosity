@@ -48,7 +48,7 @@ export function useChat({ chatId }: UseChatOptions) {
   );
 
   const sendMessage = useCallback(
-    async (content: string, parentId?: string | null) => {
+    async (content: string, parentId?: string | null, image?: File) => {
       setIsLoading(true);
       setStreamingContent("");
       setError(null);
@@ -56,6 +56,16 @@ export function useChat({ chatId }: UseChatOptions) {
       abortRef.current = new AbortController();
 
       try {
+        // Convert image file to base64 if provided
+        let imageData: { base64: string; mimeType: string } | undefined;
+        if (image) {
+          const buffer = await image.arrayBuffer();
+          const base64 = btoa(
+            new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
+          );
+          imageData = { base64, mimeType: image.type };
+        }
+
         const response = await fetch("/api/llm/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -63,6 +73,7 @@ export function useChat({ chatId }: UseChatOptions) {
             chatId,
             content,
             parentId: parentId || getLastMessageId(),
+            image: imageData,
           }),
           signal: abortRef.current.signal,
         });
