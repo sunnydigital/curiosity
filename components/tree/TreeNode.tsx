@@ -97,17 +97,9 @@ function TreeNodeComponent(props: NodeProps) {
         borderColor: `var(${borderVar})`,
       }}
     >
-      {/* Top/Bottom handles for trunk connections */}
+      {/* Top/Bottom handles for all connections */}
       <Handle id="top" type="target" position={Position.Top} className="!bg-border" />
       <Handle id="bottom" type="source" position={Position.Bottom} className="!bg-border" />
-
-      {/* Side handles for branch connections - target on sides */}
-      <Handle id="left" type="target" position={Position.Left} className="!bg-border" style={{ top: '50%' }} />
-      <Handle id="right" type="target" position={Position.Right} className="!bg-border" style={{ top: '50%' }} />
-
-      {/* Side source handles for outgoing branches */}
-      <Handle id="source-left" type="source" position={Position.Left} className="!bg-border" style={{ top: '50%' }} />
-      <Handle id="source-right" type="source" position={Position.Right} className="!bg-border" style={{ top: '50%' }} />
 
       {canDelete && (
         <button

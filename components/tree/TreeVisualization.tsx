@@ -151,7 +151,7 @@ export function TreeVisualization({
         zoomOnPinch={true}
         panOnScroll={false}
         panOnDrag={true}
-        attributionPosition="bottom-left"
+        proOptions={{ hideAttribution: true }}
         className="bg-background"
       >
         <Controls

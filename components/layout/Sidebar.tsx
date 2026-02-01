@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useParams } from "next/navigation";
 import { Plus, Search, MessageSquare, Star, Pencil, Trash2, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,9 @@ export function Sidebar() {
   const [searchQuery, setSearchQuery] = useState("");
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   const fetchChats = useCallback(async () => {
     try {
@@ -67,17 +71,22 @@ export function Sidebar() {
     }
   };
 
-  const handleDeleteChat = async (chatId: string) => {
-    if (!confirm("Delete this chat?")) return;
+  const handleDeleteChat = (chatId: string, title: string) => {
+    setDeleteTarget({ id: chatId, title });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
     try {
-      await fetch(`/api/chat/${chatId}`, { method: "DELETE" });
-      if (currentChatId === chatId) {
+      await fetch(`/api/chat/${deleteTarget.id}`, { method: "DELETE" });
+      if (currentChatId === deleteTarget.id) {
         router.push("/");
       }
       fetchChats();
     } catch (error) {
       console.error("Failed to delete chat:", error);
     }
+    setDeleteTarget(null);
   };
 
   const handleStarChat = async (chatId: string, starred: boolean, e: React.MouseEvent) => {
@@ -94,20 +103,27 @@ export function Sidebar() {
     }
   };
 
-  const handleRenameChat = async (chatId: string, currentTitle: string) => {
-    const newTitle = prompt("Enter new chat name:", currentTitle);
-    if (newTitle && newTitle !== currentTitle) {
-      try {
-        await fetch(`/api/chat/${chatId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: newTitle }),
-        });
-        fetchChats();
-      } catch (error) {
-        console.error("Failed to rename chat:", error);
-      }
+  const handleRenameChat = (chatId: string, currentTitle: string) => {
+    setRenameTarget({ id: chatId, title: currentTitle });
+    setRenameValue(currentTitle);
+  };
+
+  const confirmRename = async () => {
+    if (!renameTarget || !renameValue.trim() || renameValue.trim() === renameTarget.title) {
+      setRenameTarget(null);
+      return;
     }
+    try {
+      await fetch(`/api/chat/${renameTarget.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: renameValue.trim() }),
+      });
+      fetchChats();
+    } catch (error) {
+      console.error("Failed to rename chat:", error);
+    }
+    setRenameTarget(null);
   };
 
   if (collapsed) {
@@ -179,7 +195,8 @@ export function Sidebar() {
             <div
               key={chat.id}
               className={cn(
-                "group flex cursor-pointer items-center rounded-md px-2 py-2 text-sm hover:bg-accent",
+                "group flex cursor-pointer rounded-md px-2 py-2 text-sm hover:bg-accent",
+                expanded ? "items-start" : "items-center",
                 currentChatId === chat.id && "bg-accent"
               )}
               onClick={() => router.push(`/chat/${chat.id}`)}
@@ -197,13 +214,27 @@ export function Sidebar() {
                 <Star className={cn("h-3 w-3", chat.starred && "fill-current")} />
               </Button>
 
-              {/* Chat title - hard-capped and truncated */}
+              {/* Chat title - single line when narrow, up to 3 lines when expanded */}
               <div className="min-w-0 flex-1">
-                <span className="block truncate" title={chat.title}>
-                  {chat.title.length > (expanded ? 39 : 18)
-                    ? chat.title.slice(0, expanded ? 39 : 18) + "..."
-                    : chat.title}
-                </span>
+                {expanded ? (
+                  <span
+                    className="block overflow-hidden text-ellipsis"
+                    style={{
+                      display: "-webkit-box",
+                      WebkitLineClamp: 3,
+                      WebkitBoxOrient: "vertical",
+                    }}
+                    title={chat.title}
+                  >
+                    {chat.title}
+                  </span>
+                ) : (
+                  <span className="block truncate" title={chat.title}>
+                    {chat.title.length > 18
+                      ? chat.title.slice(0, 18) + "..."
+                      : chat.title}
+                  </span>
+                )}
               </div>
 
               {/* Action buttons - fixed to the right */}
@@ -221,7 +252,7 @@ export function Sidebar() {
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-destructive hover:bg-destructive/10"
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleDeleteChat(chat.id);
+                    handleDeleteChat(chat.id, chat.title);
                   }}
                 >
                   <Trash2 className="h-3 w-3" />
@@ -237,6 +268,96 @@ export function Sidebar() {
         </div>
       </ScrollArea>
 
+      {deleteTarget && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            className="mx-4 w-full max-w-sm rounded-lg border border-border bg-background p-6 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-foreground">Delete chat</h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Are you sure you want to delete{" "}
+              <span className="font-medium text-foreground">
+                {deleteTarget.title.length > 30
+                  ? deleteTarget.title.slice(0, 30) + "..."
+                  : deleteTarget.title}
+              </span>
+              ? This action cannot be undone.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setDeleteTarget(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={confirmDelete}
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {renameTarget && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setRenameTarget(null)}
+        >
+          <div
+            className="mx-4 w-full max-w-sm rounded-lg border border-border bg-background p-6 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-foreground">Rename chat</h3>
+            <form
+              className="mt-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                confirmRename();
+              }}
+            >
+              <Input
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                placeholder="Chat name..."
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setRenameTarget(null);
+                  }
+                }}
+              />
+              <div className="mt-5 flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setRenameTarget(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                >
+                  Rename
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

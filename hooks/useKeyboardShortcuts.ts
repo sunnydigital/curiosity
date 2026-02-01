@@ -1,19 +1,23 @@
 "use client";
 
 import { useEffect, useCallback } from "react";
+import type { Shortcut } from "@/components/chat/TextSelectionToolbar";
 
 interface UseKeyboardShortcutsOptions {
+  shortcuts: Shortcut[];
   onBranch: (
-    type: "learn_more" | "dont_understand" | "specifics",
+    type: "learn_more" | "dont_understand" | "specifics" | "custom",
     selectedText: string,
     messageId: string,
     charStart: number,
-    charEnd: number
+    charEnd: number,
+    customPrompt?: string
   ) => void;
   enabled?: boolean;
 }
 
 export function useKeyboardShortcuts({
+  shortcuts,
   onBranch,
   enabled = true,
 }: UseKeyboardShortcutsOptions) {
@@ -22,14 +26,12 @@ export function useKeyboardShortcuts({
       if (!enabled) return;
       if (!e.ctrlKey && !e.metaKey) return;
 
-      const branchTypes: Record<string, "learn_more" | "dont_understand" | "specifics"> = {
-        "1": "learn_more",
-        "2": "dont_understand",
-        "3": "specifics",
-      };
+      // Map key "1"–"9" to shortcut index 0–8
+      const num = parseInt(e.key, 10);
+      if (isNaN(num) || num < 1 || num > shortcuts.length) return;
 
-      const branchType = branchTypes[e.key];
-      if (!branchType) return;
+      const sc = shortcuts[num - 1];
+      if (!sc) return;
 
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed) return;
@@ -59,9 +61,14 @@ export function useKeyboardShortcuts({
       const charEnd = charStart + text.length;
 
       e.preventDefault();
-      onBranch(branchType, text, messageId, charStart, charEnd);
+
+      if (sc.builtinType) {
+        onBranch(sc.builtinType, text, messageId, charStart, charEnd);
+      } else {
+        onBranch("custom", text, messageId, charStart, charEnd, sc.prompt);
+      }
     },
-    [enabled, onBranch]
+    [enabled, onBranch, shortcuts]
   );
 
   useEffect(() => {

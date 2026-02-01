@@ -21,7 +21,7 @@ export const PREVIEW_PROMPT =
   "Summarize this branch of conversation in 1-2 sentences. Focus on the key topic and what was explored. Be concise.";
 
 export const SELECTION_SUMMARY_PROMPT =
-  "In 1 brief sentence, summarize or explain the following text excerpt. Do not ask for more context. Do not say you are happy to help. Just provide the summary directly.";
+  "You will receive a text excerpt selected by the user. If it is a single word or short phrase, give a concise definition or explanation. If it is a longer passage, summarize it in 1 brief sentence. Reply with ONLY the definition or summary — no greetings, no preamble, no offers to help.";
 
 export const DEFAULT_DECAY_LAMBDA = 0.0000001;
 export const DEFAULT_SIMILARITY_WEIGHT = 0.7;

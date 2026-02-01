@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getSettings } from "@/db/queries/settings";
-import { getProvider } from "@/lib/llm/provider-registry";
+import { getProvider, getPreviewProvider } from "@/lib/llm/provider-registry";
 import { createMessage, getPathToRoot } from "@/db/queries/messages";
 import { touchChat, renameChat, getChat } from "@/db/queries/chats";
 import { getMemoryContext, onNewExchange } from "@/lib/memory/memory-manager";
@@ -9,7 +9,7 @@ import type { LLMMessage } from "@/types";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { chatId, content, parentId } = body;
+  const { chatId, content, parentId, image } = body;
 
   const userMessage = createMessage({
     chatId,
@@ -46,6 +46,14 @@ export async function POST(request: NextRequest) {
       content: m.content,
     }))
   );
+
+  // Attach image to the last user message if provided
+  if (image && llmMessages.length > 0) {
+    const lastMsg = llmMessages[llmMessages.length - 1];
+    if (lastMsg.role === "user") {
+      lastMsg.image = { base64: image.base64, mimeType: image.mimeType };
+    }
+  }
 
   const encoder = new TextEncoder();
   let fullContent = "";
@@ -94,35 +102,48 @@ export async function POST(request: NextRequest) {
               () => { }
             );
 
-            // Auto-title chat if it's the first exchange
+            // Auto-title chat if it's the first exchange (use lightweight preview model)
             const chat = getChat(chatId);
             if (chat && chat.title === "New Chat") {
+              const titleMessages: LLMMessage[] = [
+                {
+                  role: "user",
+                  content: `Generate a short title (3-6 words) for the following conversation. Return only the title, no quotes or punctuation.\n\nUser: ${content}\nAssistant: ${fullContent.slice(0, 500)}`,
+                },
+              ];
+
+              let title = "";
+              // Try preview provider first, fall back to active provider
               try {
-                const r = await provider.complete({
-                  model: settings.activeModel,
-                  messages: [
-                    {
-                      role: "system",
-                      content:
-                        "Generate a short title (3-6 words) for this conversation. Return only the title, no quotes or punctuation.",
-                    },
-                    { role: "user", content },
-                    { role: "assistant", content: fullContent },
-                  ],
+                const titleProvider = getPreviewProvider(settings);
+                const r = await titleProvider.complete({
+                  model: settings.previewModel,
+                  messages: titleMessages,
                   temperature: 0.7,
                   maxTokens: 30,
                 });
-                const title = r.content.trim().replace(/^["']|["']$/g, '').slice(0, 50);
-                if (title) {
-                  renameChat(chatId, title);
-                  controller.enqueue(
-                    encoder.encode(
-                      `data: ${JSON.stringify({ type: "title_updated", title })}\n\n`
-                    )
-                  );
-                }
+                title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
               } catch {
-                // Title generation is best-effort
+                try {
+                  const r = await provider.complete({
+                    model: settings.activeModel,
+                    messages: titleMessages,
+                    temperature: 0.7,
+                    maxTokens: 30,
+                  });
+                  title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
+                } catch {
+                  // Title generation is best-effort
+                }
+              }
+
+              if (title) {
+                renameChat(chatId, title);
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({ type: "title_updated", title })}\n\n`
+                  )
+                );
               }
             }
 

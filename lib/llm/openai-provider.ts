@@ -17,10 +17,28 @@ export class OpenAIProvider extends BaseLLMProvider {
     this.client = new OpenAI({ apiKey });
   }
 
+  private formatMessages(messages: LLMCompletionRequest["messages"]) {
+    return messages.map((m) => {
+      if (m.image) {
+        return {
+          role: m.role,
+          content: [
+            { type: "text" as const, text: m.content },
+            {
+              type: "image_url" as const,
+              image_url: { url: `data:${m.image.mimeType};base64,${m.image.base64}` },
+            },
+          ],
+        };
+      }
+      return { role: m.role, content: m.content };
+    });
+  }
+
   async complete(req: LLMCompletionRequest): Promise<LLMCompletionResponse> {
     const response = await this.client.chat.completions.create({
       model: req.model,
-      messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
+      messages: this.formatMessages(req.messages) as any,
       temperature: req.temperature ?? 0.7,
       max_tokens: req.maxTokens,
     });
@@ -44,7 +62,7 @@ export class OpenAIProvider extends BaseLLMProvider {
   ): AsyncGenerator<LLMStreamChunk, void, unknown> {
     const response = await this.client.chat.completions.create({
       model: req.model,
-      messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
+      messages: this.formatMessages(req.messages) as any,
       temperature: req.temperature ?? 0.7,
       max_tokens: req.maxTokens,
       stream: true,

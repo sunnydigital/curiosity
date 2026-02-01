@@ -167,10 +167,10 @@ export function MessageBubble({
       </div>
       <div
         className={cn(
-          "relative max-w-[80%] rounded-lg px-4 py-3",
+          "relative rounded-lg px-4",
           isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted text-foreground"
+            ? "max-w-[50%] bg-primary text-primary-foreground py-0.2"
+            : "max-w-[100%] bg-muted text-foreground py-3"
         )}
       >
         {message.isBranchRoot && (
