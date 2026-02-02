@@ -3,6 +3,7 @@
 import { useMemo, useCallback, useEffect } from "react";
 import {
   ReactFlow,
+  ReactFlowProvider,
   MiniMap,
   Controls,
   Background,
@@ -21,6 +22,17 @@ import type { Message } from "@/types";
 
 const nodeTypes = { chatNode: TreeNodeMemo };
 const edgeTypes = { chatEdge: TreeEdgeMemo };
+
+/** Re-fits the viewport whenever the node count changes */
+function FitViewOnChange({ nodeCount }: { nodeCount: number }) {
+  const { fitView } = useReactFlow();
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      fitView({ duration: 200 });
+    });
+  }, [nodeCount, fitView]);
+  return null;
+}
 
 // Custom component to render edges in the MiniMap
 function MiniMapEdges({ edges, nodes }: { edges: Edge[]; nodes: Node[] }) {
@@ -136,45 +148,48 @@ export function TreeVisualization({
 
   return (
     <div className="h-full w-full">
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onNodeClick={handleNodeClick}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        fitView
-        minZoom={0.1}
-        maxZoom={2}
-        zoomOnScroll={true}
-        zoomOnPinch={true}
-        panOnScroll={false}
-        panOnDrag={true}
-        proOptions={{ hideAttribution: true }}
-        className="bg-background"
-      >
-        <Controls
-          className="!bg-background !border-border"
-          showZoom={true}
-          showFitView={true}
-          showInteractive={false}
-        />
-        <MiniMap
-          className="!bg-background !border-border"
-          nodeColor={getNodeColor}
-          zoomable
-          pannable
+      <ReactFlowProvider>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onNodeClick={handleNodeClick}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          fitView
+          minZoom={0.1}
+          maxZoom={2}
+          zoomOnScroll={true}
+          zoomOnPinch={true}
+          panOnScroll={false}
+          panOnDrag={true}
+          proOptions={{ hideAttribution: true }}
+          className="bg-background"
         >
-          <MiniMapEdges edges={edges} nodes={nodes} />
-        </MiniMap>
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={16}
-          size={1}
-          color="var(--tree-bg-dots)"
-        />
-      </ReactFlow>
+          <FitViewOnChange nodeCount={nodes.length} />
+          <Controls
+            className="!bg-background !border-border"
+            showZoom={true}
+            showFitView={true}
+            showInteractive={false}
+          />
+          <MiniMap
+            className="!bg-background !border-border"
+            nodeColor={getNodeColor}
+            zoomable
+            pannable
+          >
+            <MiniMapEdges edges={edges} nodes={nodes} />
+          </MiniMap>
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={16}
+            size={1}
+            color="var(--tree-bg-dots)"
+          />
+        </ReactFlow>
+      </ReactFlowProvider>
     </div>
   );
 }

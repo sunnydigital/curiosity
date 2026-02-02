@@ -23,6 +23,10 @@ export const PREVIEW_PROMPT =
 export const SELECTION_SUMMARY_PROMPT =
   "You will receive a text excerpt selected by the user. If it is a single word or short phrase, give a concise definition or explanation. If it is a longer passage, summarize it in 1 brief sentence. Reply with ONLY the definition or summary — no greetings, no preamble, no offers to help.";
 
+export function getSelectionSummaryPrompt(sentences: number): string {
+  return `You will receive a text excerpt selected by the user. If it is a single word or short phrase, give a concise definition or explanation. If it is a longer passage, summarize it in ${sentences} sentence${sentences === 1 ? "" : "s"} or fewer. Reply with ONLY the definition or summary — no greetings, no preamble, no offers to help.`;
+}
+
 export const DEFAULT_DECAY_LAMBDA = 0.0000001;
 export const DEFAULT_SIMILARITY_WEIGHT = 0.7;
 export const DEFAULT_TEMPORAL_WEIGHT = 0.3;

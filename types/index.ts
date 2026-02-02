@@ -1,5 +1,41 @@
 export type LLMProviderName = "openai" | "anthropic" | "gemini" | "ollama";
 
+export type AuthMode = "api_key" | "oauth";
+
+export type SubscriptionTier =
+  | "free"
+  | "plus"
+  | "pro"
+  | "max"
+  | "enterprise"
+  | "unknown";
+
+export interface OAuthTokens {
+  provider: LLMProviderName;
+  accessToken: string;
+  refreshToken: string | null;
+  tokenType: string;
+  expiresAt: string | null;
+  scope: string | null;
+  subscriptionTier: SubscriptionTier;
+  subscriptionMetadata: Record<string, any> | null;
+}
+
+export interface ProviderError {
+  provider: LLMProviderName;
+  statusCode?: number;
+  errorType: "rate_limit" | "auth" | "server" | "timeout" | "unknown";
+  message: string;
+  retryable: boolean;
+}
+
+export interface FailoverEvent {
+  type: "failover";
+  fromProvider: LLMProviderName;
+  toProvider: LLMProviderName;
+  reason: string;
+}
+
 export interface Chat {
   id: string;
   title: string;
@@ -97,6 +133,21 @@ export interface Settings {
   temporalWeight: number;
   previewProvider: LLMProviderName;
   previewModel: string;
+  summarySentences: number;
+  // Auth mode per provider
+  openaiAuthMode: AuthMode;
+  anthropicAuthMode: AuthMode;
+  geminiAuthMode: AuthMode;
+  // OAuth client credentials (per provider)
+  openaiOauthClientId: string | null;
+  openaiOauthClientSecret: string | null;
+  anthropicOauthClientId: string | null;
+  anthropicOauthClientSecret: string | null;
+  geminiOauthClientId: string | null;
+  geminiOauthClientSecret: string | null;
+  // Failover
+  failoverEnabled: boolean;
+  failoverChain: LLMProviderName[];
 }
 
 export interface LLMMessage {

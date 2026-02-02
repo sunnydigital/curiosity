@@ -7,6 +7,7 @@ import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { TextSelectionToolbar, loadShortcuts } from "./TextSelectionToolbar";
 import { ChatActions } from "./ChatActions";
+import { TypingBubbles } from "./TypingBubbles";
 import { TreePanel } from "@/components/tree/TreePanel";
 import { MemoryPanel } from "@/components/memory/MemoryPanel";
 import { Button } from "@/components/ui/button";
@@ -48,9 +49,12 @@ export function ChatView({ chatId }: ChatViewProps) {
     streamingContent,
     error,
     activePath,
+    failoverNotice,
     fetchMessages,
     sendMessage,
     stopStreaming,
+    retryMessage,
+    removeMessage,
     getPathMessages,
     navigateToBranch,
     setActivePath,
@@ -71,6 +75,7 @@ export function ChatView({ chatId }: ChatViewProps) {
     position: { x: number; y: number };
   } | null>(null);
   const [shortcuts, setShortcuts] = useState(() => loadShortcuts());
+  const [pendingEditContent, setPendingEditContent] = useState<string | null>(null);
 
   // Re-sync shortcuts from localStorage when toolbar opens (picks up adds/removes)
   useEffect(() => {
@@ -210,10 +215,10 @@ export function ChatView({ chatId }: ChatViewProps) {
       });
 
       const data = await res.json();
-      await fetchMessages();
+      const freshMessages = await fetchMessages();
 
       if (data.branchRoot) {
-        navigateToBranch(data.branchRoot.id);
+        navigateToBranch(data.branchRoot.id, freshMessages);
       }
     } catch (err) {
       console.error("Branch creation failed:", err);
@@ -246,8 +251,8 @@ export function ChatView({ chatId }: ChatViewProps) {
         .then(async (data) => {
           if (!data) return;
           if (data.error) console.error("Branch error:", data.error);
-          await fetchMessages();
-          if (data.branchRoot) navigateToBranch(data.branchRoot.id);
+          const freshMessages = await fetchMessages();
+          if (data.branchRoot) navigateToBranch(data.branchRoot.id, freshMessages);
         })
         .catch(console.error);
     },
@@ -300,6 +305,33 @@ export function ChatView({ chatId }: ChatViewProps) {
     [chatId, activePath, setActivePath, fetchMessages]
   );
 
+  // Detect if the last displayed message is a failed user message (no assistant child)
+  const failedMessageId = useMemo(() => {
+    if (isLoading) return null;
+    const last = displayMessages[displayMessages.length - 1];
+    if (!last || last.role !== "user") return null;
+    // Check if there's any child message (assistant response)
+    const hasChild = messages.some((m) => m.parentId === last.id);
+    return hasChild ? null : last.id;
+  }, [displayMessages, messages, isLoading]);
+
+  const handleRetry = useCallback(
+    (messageId: string) => {
+      retryMessage(messageId);
+    },
+    [retryMessage]
+  );
+
+  const handleEditResend = useCallback(
+    async (messageId: string) => {
+      const content = await removeMessage(messageId);
+      if (content) {
+        setPendingEditContent(content);
+      }
+    },
+    [removeMessage]
+  );
+
   const isOnBranch = activePath.length > 0;
 
   return (
@@ -338,29 +370,50 @@ export function ChatView({ chatId }: ChatViewProps) {
               </div>
             )}
 
-            {displayMessages.map((message, index) => {
-              const isLast =
-                index === displayMessages.length - 1 &&
-                message.role === "assistant";
-              return (
-                <MessageBubble
-                  key={message.id}
-                  message={message}
-                  isStreaming={isLast && isLoading}
-                  streamingContent={
-                    isLast && isLoading ? streamingContent : undefined
-                  }
-                  branches={getBranches(message.id)}
-                  onBranchClick={navigateToBranch}
-                  onTextSelect={handleTextSelect}
-                />
-              );
-            })}
+            {displayMessages.map((message) => (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                branches={getBranches(message.id)}
+                onBranchClick={navigateToBranch}
+                onTextSelect={handleTextSelect}
+                isFailed={message.id === failedMessageId}
+                onRetry={handleRetry}
+                onEditResend={handleEditResend}
+              />
+            ))}
 
-            {isLoading && displayMessages.length === 0 && (
+            {/* Streaming assistant response — shown while the AI is generating */}
+            {isLoading && streamingContent && (
+              <MessageBubble
+                key="streaming"
+                message={{
+                  id: "streaming",
+                  chatId,
+                  role: "assistant",
+                  content: "",
+                  parentId: displayMessages[displayMessages.length - 1]?.id ?? null,
+                  isBranchRoot: false,
+                  branchPrompt: null,
+                  branchContext: null,
+                  branchSourceMessageId: null,
+                  branchCharStart: null,
+                  branchCharEnd: null,
+                  previewSummary: null,
+                  siblingIndex: 0,
+                  provider: null,
+                  model: null,
+                  createdAt: new Date().toISOString(),
+                }}
+                isStreaming
+                streamingContent={streamingContent}
+              />
+            )}
+
+            {isLoading && !streamingContent && (
               <div className="flex justify-start py-4">
                 <div className="rounded-lg bg-muted px-4 py-3">
-                  <span className="inline-block h-4 w-1 animate-pulse bg-foreground" />
+                  <TypingBubbles />
                 </div>
               </div>
             )}
@@ -374,6 +427,12 @@ export function ChatView({ chatId }: ChatViewProps) {
             )}
           </div>
         </div>
+
+        {failoverNotice && (
+          <div className="border-t border-amber-500/50 bg-amber-500/10 px-4 py-2 text-xs text-amber-700">
+            Switched from {failoverNotice.fromProvider} to {failoverNotice.toProvider}: {failoverNotice.reason}
+          </div>
+        )}
 
         {error && (
           <div className="border-t border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive">
@@ -402,6 +461,8 @@ export function ChatView({ chatId }: ChatViewProps) {
           onStop={stopStreaming}
           isLoading={isLoading}
           supportsImages={modelSupportsImages(activeProvider, activeModel)}
+          initialContent={pendingEditContent}
+          onInitialContentConsumed={() => setPendingEditContent(null)}
         />
       </div>
 

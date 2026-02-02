@@ -11,6 +11,8 @@ interface MessageInputProps {
   isLoading?: boolean;
   disabled?: boolean;
   supportsImages?: boolean;
+  initialContent?: string | null;
+  onInitialContentConsumed?: () => void;
 }
 
 export function MessageInput({
@@ -19,6 +21,8 @@ export function MessageInput({
   isLoading,
   disabled,
   supportsImages = false,
+  initialContent,
+  onInitialContentConsumed,
 }: MessageInputProps) {
   const [content, setContent] = useState("");
   const [image, setImage] = useState<File | null>(null);
@@ -30,6 +34,22 @@ export function MessageInput({
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+
+  // Pre-fill textarea when initialContent is provided (edit & resend flow)
+  useEffect(() => {
+    if (initialContent) {
+      setContent(initialContent);
+      onInitialContentConsumed?.();
+      // Focus and move cursor to end
+      setTimeout(() => {
+        const textarea = textareaRef.current;
+        if (textarea) {
+          textarea.focus();
+          textarea.selectionStart = textarea.selectionEnd = textarea.value.length;
+        }
+      }, 0);
+    }
+  }, [initialContent, onInitialContentConsumed]);
 
   // Auto-resize textarea up to 5 rows
   useEffect(() => {

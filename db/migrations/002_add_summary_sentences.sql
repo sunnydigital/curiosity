@@ -1,0 +1,1 @@
+ALTER TABLE settings ADD COLUMN summary_sentences INTEGER NOT NULL DEFAULT 2;

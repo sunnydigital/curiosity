@@ -23,29 +23,52 @@ export interface TreeEdgeData {
   };
 }
 
-const NODE_HEIGHT = 80;
+// Layout constants
 const NODE_WIDTH = 200;
-const VERTICAL_GAP = 80;
-const HORIZONTAL_GAP = 240;
-const TRUNK_COL = 0;
+const NODE_HEIGHT = 80;
+const H_SPACING = 40;
+const V_SPACING = 80;
+
+/**
+ * Extended node for layout.
+ *
+ * For every node we compute two extents measured outward from the node centre:
+ *   leftExtent  – how far left (positive number) the subtree reaches
+ *   rightExtent – how far right (positive number) the subtree reaches
+ *
+ * The full subtree width = leftExtent + rightExtent.
+ *
+ * For trunk nodes the centre stays on the trunk axis (x = 0 relative), so
+ * branches placed to the left contribute to leftExtent and branches placed
+ * to the right contribute to rightExtent.  The trunk child's own extents
+ * propagate upward so that higher-level branch placement knows how much
+ * room the lower trunk already needs.
+ */
+interface LayoutNode {
+  message: Message;
+  children: LayoutNode[];
+  isTrunk?: boolean;
+  // Subtree extents from this node's centre
+  leftExtent: number;
+  rightExtent: number;
+  x?: number;
+  y?: number;
+}
 
 export function computeTreeLayout(
   messages: Message[],
-  activeIds: Set<string>
+  activeIds: Set<string>,
 ): { nodes: TreeNodeData[]; edges: TreeEdgeData[] } {
   if (messages.length === 0) return { nodes: [], edges: [] };
 
+  /* ── build parent→children map ── */
   const childrenMap = new Map<string | null, Message[]>();
-  const messageMap = new Map<string, Message>();
 
   for (const msg of messages) {
-    messageMap.set(msg.id, msg);
     const key = msg.parentId;
     if (!childrenMap.has(key)) childrenMap.set(key, []);
     childrenMap.get(key)!.push(msg);
   }
-
-  // Sort children by sibling_index
   for (const [, children] of childrenMap) {
     children.sort((a, b) => a.siblingIndex - b.siblingIndex);
   }
@@ -53,216 +76,293 @@ export function computeTreeLayout(
   const root = messages.find((m) => !m.parentId);
   if (!root) return { nodes: [], edges: [] };
 
-  // Find the trunk path
+  /* ── identify trunk ── */
   const trunkIds = new Set<string>();
-  let current: Message | undefined = root;
-  while (current) {
-    trunkIds.add(current.id);
-    const nextChildren: Message[] = childrenMap.get(current.id) || [];
-    current = nextChildren.find((c) => !c.isBranchRoot) || undefined;
+  let cur: Message | undefined = root;
+  while (cur) {
+    trunkIds.add(cur.id);
+    const next: Message[] = childrenMap.get(cur.id) || [];
+    cur = next.find((c) => !c.isBranchRoot) || undefined;
   }
 
+  /* ── build LayoutNode tree ── */
+  function buildTree(msg: Message): LayoutNode {
+    const kids = childrenMap.get(msg.id) || [];
+    return {
+      message: msg,
+      children: kids.map(buildTree),
+      isTrunk: trunkIds.has(msg.id),
+      leftExtent: NODE_WIDTH / 2,
+      rightExtent: NODE_WIDTH / 2,
+    };
+  }
+  const layoutRoot = buildTree(root);
+
+  /* ──────────────────────────────────────────────────────────────────────
+   * STEP 1 – bottom-up DFS: compute leftExtent / rightExtent for every
+   *          node so that all descendants are accounted for.
+   *
+   * For a NON-TRUNK node the children are laid out left-to-right in a
+   * row (standard Reingold–Tilford style).
+   *
+   * For a TRUNK node the trunk child stays centred and its extents
+   * propagate directly.  Branch children are placed on the left or right
+   * side *outside* the trunk child's extent, so higher branches wrap
+   * around lower ones.
+   *
+   * Side assignment uses a global running accumulator so that across the
+   * full trunk the left/right total weight stays balanced.
+   * ────────────────────────────────────────────────────────────────────── */
+
+  // We need raw subtree widths before we can do side assignment, but side
+  // assignment itself affects the extents.  So we do TWO bottom-up passes:
+  //   1. Compute a simple "total subtree span" for every node (ignoring
+  //      trunk semantics) so partitioning can compare branch weights.
+  //   2. After side assignment, compute the real left/rightExtent.
+
+  // Pass 1 – simple span (just for partitioning weights)
+  // Bottom-up DFS: each node's span = sum of children spans + spacing
+  const spanMap = new Map<string, number>();
+  function fillSpans(node: LayoutNode): number {
+    if (node.children.length === 0) {
+      spanMap.set(node.message.id, NODE_WIDTH);
+      return NODE_WIDTH;
+    }
+    let sum = 0;
+    for (const c of node.children) {
+      if (sum > 0) sum += H_SPACING;
+      sum += fillSpans(c);
+    }
+    const span = Math.max(NODE_WIDTH, sum);
+    spanMap.set(node.message.id, span);
+    return span;
+  }
+  fillSpans(layoutRoot);
+
+  /* ── Side assignment for every trunk fork point ── */
+  // Key: trunk node id → { left: branch nodes, right: branch nodes }
+  const sideMap = new Map<
+    string,
+    { left: LayoutNode[]; right: LayoutNode[] }
+  >();
+
+  {
+    // Collect fork points (trunk nodes that have non-trunk children)
+    const forks: { id: string; branches: LayoutNode[] }[] = [];
+    let t: LayoutNode | undefined = layoutRoot;
+    while (t && t.isTrunk) {
+      const branches = t.children.filter((c) => !c.isTrunk);
+      if (branches.length > 0) {
+        forks.push({ id: t.message.id, branches });
+      }
+      t = t.children.find((c) => c.isTrunk);
+    }
+
+    let leftAccum = 0;
+    let rightAccum = 0;
+
+    for (const fp of forks) {
+      // Sort branches descending by span for greedy balancing
+      const sorted = [...fp.branches].sort(
+        (a, b) =>
+          (spanMap.get(b.message.id) || NODE_WIDTH) -
+          (spanMap.get(a.message.id) || NODE_WIDTH),
+      );
+
+      const left: LayoutNode[] = [];
+      const right: LayoutNode[] = [];
+      let lSum = leftAccum;
+      let rSum = rightAccum;
+
+      for (const branch of sorted) {
+        const w = spanMap.get(branch.message.id) || NODE_WIDTH;
+        if (lSum <= rSum) {
+          left.push(branch);
+          lSum += w;
+        } else {
+          right.push(branch);
+          rSum += w;
+        }
+      }
+
+      sideMap.set(fp.id, { left, right });
+      leftAccum = lSum;
+      rightAccum = rSum;
+    }
+  }
+
+  /* ── Pass 2 – real extents (bottom-up DFS) ──
+   *
+   * Compute leftExtent/rightExtent for every node.
+   * For trunk nodes: the trunk child's extents propagate upward, and
+   * branches placed on each side ADD to the corresponding wing.
+   * This is the key: lower-trunk extents propagate up so that branches
+   * originating higher on the trunk are placed further outward.
+   */
+  function calcWidth(node: LayoutNode): { left: number; right: number } {
+    if (node.children.length === 0) {
+      node.leftExtent = NODE_WIDTH / 2;
+      node.rightExtent = NODE_WIDTH / 2;
+      return { left: NODE_WIDTH / 2, right: NODE_WIDTH / 2 };
+    }
+
+    // Recurse children first
+    for (const c of node.children) calcWidth(c);
+
+    if (node.isTrunk) {
+      const trunkChild = node.children.find((c) => c.isTrunk);
+      const assignment = sideMap.get(node.message.id);
+
+      // The trunk child's wings propagate up (the space that lower trunk
+      // levels already need).
+      let leftWing = trunkChild ? trunkChild.leftExtent : NODE_WIDTH / 2;
+      let rightWing = trunkChild ? trunkChild.rightExtent : NODE_WIDTH / 2;
+
+      // Ensure at minimum NODE_WIDTH / 2
+      leftWing = Math.max(leftWing, NODE_WIDTH / 2);
+      rightWing = Math.max(rightWing, NODE_WIDTH / 2);
+
+      if (assignment) {
+        // Left branches are placed OUTSIDE the current leftWing.
+        // Each branch is offset starting from leftWing + H_SPACING,
+        // so the full width stacks outward.
+        let leftExtra = 0;
+        for (const branch of assignment.left) {
+          leftExtra += H_SPACING + branch.leftExtent + branch.rightExtent;
+        }
+        leftWing += leftExtra;
+
+        let rightExtra = 0;
+        for (const branch of assignment.right) {
+          rightExtra += H_SPACING + branch.leftExtent + branch.rightExtent;
+        }
+        rightWing += rightExtra;
+      }
+
+      node.leftExtent = leftWing;
+      node.rightExtent = rightWing;
+      return { left: leftWing, right: rightWing };
+    } else {
+      // Non-trunk: lay children in a row
+      let total = 0;
+      for (let i = 0; i < node.children.length; i++) {
+        const c = node.children[i];
+        if (i > 0) total += H_SPACING;
+        total += c.leftExtent + c.rightExtent;
+      }
+      const half = Math.max(NODE_WIDTH / 2, total / 2);
+      node.leftExtent = half;
+      node.rightExtent = half;
+      return { left: half, right: half };
+    }
+  }
+
+  calcWidth(layoutRoot);
+
+  /* ── STEP 3 – top-down DFS: position every node ── */
   const nodes: TreeNodeData[] = [];
   const edges: TreeEdgeData[] = [];
 
-  // Calculate width of each subtree (number of leaf nodes / terminal paths)
-  const subtreeWidthCache = new Map<string, number>();
-
-  function calcSubtreeWidth(messageId: string): number {
-    if (subtreeWidthCache.has(messageId)) {
-      return subtreeWidthCache.get(messageId)!;
-    }
-
-    const children = childrenMap.get(messageId) || [];
-
-    if (children.length === 0) {
-      subtreeWidthCache.set(messageId, 1);
-      return 1;
-    }
-
-    // For trunk nodes, trunk child doesn't add width (stays in same column)
-    // Only branch children contribute width
-    if (trunkIds.has(messageId)) {
-      const trunkChild = children.find((c) => trunkIds.has(c.id));
-      const branchChildren = children.filter((c) => !trunkIds.has(c.id));
-
-      // Width needed = sum of branch widths + trunk width (which uses center)
-      const branchWidth = branchChildren.reduce(
-        (sum, c) => sum + calcSubtreeWidth(c.id),
-        0
-      );
-      // Trunk needs at least 1 column in the center
-      const trunkWidth = trunkChild ? calcSubtreeWidth(trunkChild.id) : 0;
-
-      // Total width: branches spread out, trunk stays center
-      // The width is max of: branch spread or what trunk needs below
-      const width = Math.max(1, branchWidth, trunkWidth);
-      subtreeWidthCache.set(messageId, width);
-      return width;
-    }
-
-    // Non-trunk: width is sum of all children widths
-    const width = children.reduce((sum, c) => sum + calcSubtreeWidth(c.id), 0);
-    subtreeWidthCache.set(messageId, Math.max(1, width));
-    return Math.max(1, width);
+  function addEdge(parentId: string, childId: string, isTrunk: boolean) {
+    edges.push({
+      id: `${parentId}-${childId}`,
+      source: parentId,
+      target: childId,
+      type: "chatEdge",
+      sourceHandle: "bottom",
+      targetHandle: "top",
+      data: { isTrunk },
+    });
   }
 
-  // Pre-calculate all widths
-  calcSubtreeWidth(root.id);
-
-  // Layout function - each node gets a column range [left, right] to work within
-  function layoutNode(
-    message: Message,
-    depth: number,
-    leftCol: number,
-    rightCol: number
-  ): void {
-    const isTrunk = trunkIds.has(message.id);
-    // Place node at center of its allocated range
-    const col = isTrunk ? TRUNK_COL : (leftCol + rightCol) / 2;
-    const x = col * HORIZONTAL_GAP - NODE_WIDTH / 2;
-    const y = depth * (NODE_HEIGHT + VERTICAL_GAP);
+  function position(node: LayoutNode, cx: number, y: number): void {
+    node.x = cx;
+    node.y = y;
 
     nodes.push({
-      id: message.id,
-      position: { x, y },
+      id: node.message.id,
+      position: { x: cx - NODE_WIDTH / 2, y },
       data: {
-        message,
-        isActive: activeIds.has(message.id),
-        isTrunk,
+        message: node.message,
+        isActive: activeIds.has(node.message.id),
+        isTrunk: node.isTrunk || false,
       },
       type: "chatNode",
     });
 
-    const nodeChildren: Message[] = childrenMap.get(message.id) || [];
-    if (nodeChildren.length === 0) return;
+    if (node.children.length === 0) return;
+    const childY = y + NODE_HEIGHT + V_SPACING;
 
-    if (isTrunk) {
-      const trunkChild = nodeChildren.find((c) => trunkIds.has(c.id));
-      const branchChildren = nodeChildren.filter((c) => !trunkIds.has(c.id));
+    if (node.isTrunk) {
+      const trunkChild = node.children.find((c) => c.isTrunk);
+      const assignment = sideMap.get(node.message.id);
 
-      // Trunk child continues at trunk column
+      // Trunk child stays on the same x axis
       if (trunkChild) {
-        edges.push({
-          id: `${message.id}-${trunkChild.id}`,
-          source: message.id,
-          target: trunkChild.id,
-          type: "chatEdge",
-          sourceHandle: "bottom",
-          targetHandle: "top",
-          data: { isTrunk: true },
-        });
-        // Trunk gets its own column range centered on TRUNK_COL
-        layoutNode(trunkChild, depth + 1, TRUNK_COL, TRUNK_COL);
+        addEdge(node.message.id, trunkChild.message.id, true);
+        position(trunkChild, cx, childY);
       }
 
-      // Distribute branches left and right of trunk
-      if (branchChildren.length > 0) {
-        const leftBranches: Message[] = [];
-        const rightBranches: Message[] = [];
+      if (assignment) {
+        // To figure out where to place branches, we need to know how
+        // much space the trunk child (and its descendants) already
+        // reserves on each side.
+        const trunkLeftWing = trunkChild
+          ? trunkChild.leftExtent
+          : NODE_WIDTH / 2;
+        const trunkRightWing = trunkChild
+          ? trunkChild.rightExtent
+          : NODE_WIDTH / 2;
 
-        for (let i = 0; i < branchChildren.length; i++) {
-          if (i % 2 === 0) {
-            rightBranches.push(branchChildren[i]);
-          } else {
-            leftBranches.push(branchChildren[i]);
+        // Right branches: stack outward from the trunk's right wing
+        {
+          let cursor = Math.max(NODE_WIDTH / 2, trunkRightWing);
+          for (const branch of assignment.right) {
+            const bw = branch.leftExtent + branch.rightExtent;
+            // The branch centre is at cursor + H_SPACING + branch.leftExtent
+            // (its left half fits right after the gap)
+            const branchCX = cx + cursor + H_SPACING + branch.leftExtent;
+
+            addEdge(node.message.id, branch.message.id, false);
+            position(branch, branchCX, childY);
+
+            cursor += H_SPACING + bw;
           }
         }
 
-        // Layout right branches - each gets width proportional to its subtree
-        let currentCol = TRUNK_COL + 1;
-        for (const child of rightBranches) {
-          const childWidth = calcSubtreeWidth(child.id);
-          const childLeft = currentCol;
-          const childRight = currentCol + childWidth - 1;
+        // Left branches: stack outward from the trunk's left wing
+        {
+          let cursor = Math.max(NODE_WIDTH / 2, trunkLeftWing);
+          for (const branch of assignment.left) {
+            const bw = branch.leftExtent + branch.rightExtent;
+            const branchCX = cx - cursor - H_SPACING - branch.rightExtent;
 
-          edges.push({
-            id: `${message.id}-${child.id}`,
-            source: message.id,
-            target: child.id,
-            type: "chatEdge",
-            sourceHandle: "bottom",
-            targetHandle: "top",
-            data: { isTrunk: false },
-          });
+            addEdge(node.message.id, branch.message.id, false);
+            position(branch, branchCX, childY);
 
-          layoutNode(child, depth + 1, childLeft, childRight);
-          currentCol = childRight + 1;
-        }
-
-        // Layout left branches
-        currentCol = TRUNK_COL - 1;
-        for (const child of leftBranches) {
-          const childWidth = calcSubtreeWidth(child.id);
-          const childRight = currentCol;
-          const childLeft = currentCol - childWidth + 1;
-
-          edges.push({
-            id: `${message.id}-${child.id}`,
-            source: message.id,
-            target: child.id,
-            type: "chatEdge",
-            sourceHandle: "bottom",
-            targetHandle: "top",
-            data: { isTrunk: false },
-          });
-
-          layoutNode(child, depth + 1, childLeft, childRight);
-          currentCol = childLeft - 1;
+            cursor += H_SPACING + bw;
+          }
         }
       }
     } else {
-      // Non-trunk node: distribute children across allocated range
-      if (nodeChildren.length === 1) {
-        const child = nodeChildren[0];
-        edges.push({
-          id: `${message.id}-${child.id}`,
-          source: message.id,
-          target: child.id,
-          type: "chatEdge",
-          sourceHandle: "bottom",
-          targetHandle: "top",
-          data: { isTrunk: false },
-        });
-        // Single child inherits parent's range
-        layoutNode(child, depth + 1, leftCol, rightCol);
-      } else {
-        // Multiple children: divide range proportionally by subtree width
-        const childWidths = nodeChildren.map((c) => calcSubtreeWidth(c.id));
-        const totalWidth = childWidths.reduce((a, b) => a + b, 0);
-        const rangeWidth = rightCol - leftCol + 1;
+      // Non-trunk: lay children out left-to-right
+      const total = node.children.reduce((s, c, i) => {
+        return s + (i > 0 ? H_SPACING : 0) + c.leftExtent + c.rightExtent;
+      }, 0);
 
-        // If range is smaller than needed, expand it
-        const actualRangeWidth = Math.max(rangeWidth, totalWidth);
-        const actualLeft = leftCol - Math.floor((actualRangeWidth - rangeWidth) / 2);
+      let x = cx - total / 2;
+      for (const child of node.children) {
+        const childCX = x + child.leftExtent;
 
-        let currentCol = actualLeft;
-        for (let i = 0; i < nodeChildren.length; i++) {
-          const child = nodeChildren[i];
-          const childWidth = childWidths[i];
-          const childLeft = currentCol;
-          const childRight = currentCol + childWidth - 1;
+        addEdge(node.message.id, child.message.id, false);
+        position(child, childCX, childY);
 
-          edges.push({
-            id: `${message.id}-${child.id}`,
-            source: message.id,
-            target: child.id,
-            type: "chatEdge",
-            sourceHandle: "bottom",
-            targetHandle: "top",
-            data: { isTrunk: false },
-          });
-
-          layoutNode(child, depth + 1, childLeft, childRight);
-          currentCol = childRight + 1;
-        }
+        x += child.leftExtent + child.rightExtent + H_SPACING;
       }
     }
   }
 
-  // Start layout from root
-  const rootWidth = calcSubtreeWidth(root.id);
-  layoutNode(root, 0, TRUNK_COL, TRUNK_COL);
+  position(layoutRoot, 0, 0);
 
   return { nodes, edges };
 }
