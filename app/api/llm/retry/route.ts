@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { getSettings } from "@/db/queries/settings";
 import { getProviderAsync, getPreviewProviderAsync } from "@/lib/llm/provider-registry";
 import { FailoverExecutor } from "@/lib/llm/failover";
-import { createMessage, getPathToRoot } from "@/db/queries/messages";
+import { getMessage, createMessage, getPathToRoot } from "@/db/queries/messages";
 import { touchChat, renameChat, getChat } from "@/db/queries/chats";
 import { getMemoryContext, onNewExchange } from "@/lib/memory/memory-manager";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/constants";
@@ -10,16 +10,24 @@ import type { LLMMessage, FailoverEvent } from "@/types";
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { chatId, content, parentId, image } = body;
+  const { userMessageId } = body;
 
-  const userMessage = createMessage({
-    chatId,
-    parentId: parentId || null,
-    role: "user",
-    content,
-  });
+  const userMessage = getMessage(userMessageId);
+  if (!userMessage) {
+    return new Response(JSON.stringify({ error: "Message not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 
-  touchChat(chatId);
+  if (userMessage.role !== "user") {
+    return new Response(JSON.stringify({ error: "Can only retry user messages" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  touchChat(userMessage.chatId);
 
   const settings = getSettings();
 
@@ -32,7 +40,7 @@ export async function POST(request: NextRequest) {
 
   // Inject memory context if enabled
   try {
-    const memoryContext = await getMemoryContext(content);
+    const memoryContext = await getMemoryContext(userMessage.content);
     if (memoryContext) {
       llmMessages.push({ role: "system", content: memoryContext });
     }
@@ -47,32 +55,16 @@ export async function POST(request: NextRequest) {
     }))
   );
 
-  // Attach image to the last user message if provided
-  if (image && llmMessages.length > 0) {
-    const lastMsg = llmMessages[llmMessages.length - 1];
-    if (lastMsg.role === "user") {
-      lastMsg.image = { base64: image.base64, mimeType: image.mimeType };
-    }
-  }
-
   const encoder = new TextEncoder();
   let fullContent = "";
 
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({ type: "user_message", message: userMessage })}\n\n`
-          )
-        );
-
         let actualProvider = settings.activeProvider;
         let actualModel = settings.activeModel;
-        let gen: AsyncGenerator<{ content: string; done: boolean }, void, unknown>;
 
         if (settings.failoverEnabled && settings.failoverChain.length > 0) {
-          // Use failover executor
           const executor = new FailoverExecutor({
             settings,
             onFailover: (evt: FailoverEvent) => {
@@ -84,12 +76,11 @@ export async function POST(request: NextRequest) {
             },
           });
 
-          gen = executor.stream({
+          const gen = executor.stream({
             model: settings.activeModel,
             messages: llmMessages,
           });
 
-          // We need to iterate and track the actual provider after completion
           for await (const chunk of gen) {
             if (chunk.content) {
               fullContent += chunk.content;
@@ -105,9 +96,8 @@ export async function POST(request: NextRequest) {
             }
           }
         } else {
-          // Direct provider call (no failover)
           const provider = await getProviderAsync(settings.activeProvider, settings);
-          gen = provider.stream({
+          const gen = provider.stream({
             model: settings.activeModel,
             messages: llmMessages,
           });
@@ -125,7 +115,7 @@ export async function POST(request: NextRequest) {
         }
 
         const assistantMessage = createMessage({
-          chatId,
+          chatId: userMessage.chatId,
           parentId: userMessage.id,
           role: "assistant",
           content: fullContent,
@@ -140,22 +130,21 @@ export async function POST(request: NextRequest) {
         );
 
         // Extract facts for memory (async, non-blocking)
-        onNewExchange(chatId, userMessage.id, content, fullContent).catch(
+        onNewExchange(userMessage.chatId, userMessage.id, userMessage.content, fullContent).catch(
           () => { }
         );
 
-        // Auto-title chat if it's the first exchange (use lightweight preview model)
-        const chat = getChat(chatId);
+        // Auto-title chat if it's the first exchange
+        const chat = getChat(userMessage.chatId);
         if (chat && chat.title === "New Chat") {
           const titleMessages: LLMMessage[] = [
             {
               role: "user",
-              content: `Generate a short title (3-6 words) for the following conversation. Return only the title, no quotes or punctuation.\n\nUser: ${content}\nAssistant: ${fullContent.slice(0, 500)}`,
+              content: `Generate a short title (3-6 words) for the following conversation. Return only the title, no quotes or punctuation.\n\nUser: ${userMessage.content}\nAssistant: ${fullContent.slice(0, 500)}`,
             },
           ];
 
           let title = "";
-          // Try preview provider first, fall back to active provider
           try {
             const titleProvider = await getPreviewProviderAsync(settings);
             const r = await titleProvider.complete({
@@ -181,7 +170,7 @@ export async function POST(request: NextRequest) {
           }
 
           if (title) {
-            renameChat(chatId, title);
+            renameChat(userMessage.chatId, title);
             controller.enqueue(
               encoder.encode(
                 `data: ${JSON.stringify({ type: "title_updated", title })}\n\n`

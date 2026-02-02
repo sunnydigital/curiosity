@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, Check, Eye, EyeOff, Trash2 } from "lucide-react";
-import type { Settings, LLMProviderName } from "@/types";
+import { SubscriptionBadge } from "@/components/settings/SubscriptionBadge";
+import { ArrowLeft, Check, Eye, EyeOff, Trash2, LogIn, LogOut, GripVertical } from "lucide-react";
+import type { Settings, LLMProviderName, AuthMode, SubscriptionTier } from "@/types";
 
 const PROVIDERS: { name: LLMProviderName; label: string; keyField: string }[] = [
   { name: "openai", label: "OpenAI", keyField: "openaiApiKey" },
@@ -23,20 +24,52 @@ const STATIC_MODEL_OPTIONS: Record<LLMProviderName, string[]> = {
   ollama: [],
 };
 
+interface OAuthProviderStatus {
+  connected: boolean;
+  tier: SubscriptionTier | null;
+  available: boolean;
+}
+
+type OAuthStatusMap = Record<string, OAuthProviderStatus>;
+
+// Extended settings type that includes server-injected oauthStatus
+interface SettingsWithOAuth extends Settings {
+  oauthStatus?: OAuthStatusMap;
+}
+
 export default function SettingsPage() {
   const router = useRouter();
-  const [settings, setSettings] = useState<Settings | null>(null);
+  const searchParams = useSearchParams();
+  const [settings, setSettings] = useState<SettingsWithOAuth | null>(null);
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
   const [ollamaLoading, setOllamaLoading] = useState(false);
+  const [oauthStatus, setOauthStatus] = useState<OAuthStatusMap>({});
+  const [oauthMessage, setOauthMessage] = useState<string | null>(null);
+
+  // Check for OAuth callback results in URL params
+  useEffect(() => {
+    const oauthResult = searchParams.get("oauth");
+    const provider = searchParams.get("provider");
+    if (oauthResult === "success" && provider) {
+      setOauthMessage(`Successfully connected to ${provider}`);
+      setTimeout(() => setOauthMessage(null), 5000);
+    } else if (oauthResult === "error" && provider) {
+      const reason = searchParams.get("reason") || "unknown error";
+      setError(`OAuth failed for ${provider}: ${reason}`);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     fetch("/api/settings")
       .then((r) => r.json())
       .then((data) => {
+        if (data.oauthStatus) {
+          setOauthStatus(data.oauthStatus);
+        }
         setSettings(data);
       })
       .catch((e) => setError(e.message));
@@ -65,6 +98,9 @@ export default function SettingsPage() {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
+      if (data.oauthStatus) {
+        setOauthStatus(data.oauthStatus);
+      }
       setSettings(data);
       return true;
     } catch (e: any) {
@@ -87,6 +123,9 @@ export default function SettingsPage() {
       decayLambda: settings.decayLambda,
       similarityWeight: settings.similarityWeight,
       temporalWeight: settings.temporalWeight,
+      summarySentences: settings.summarySentences,
+      failoverEnabled: settings.failoverEnabled,
+      failoverChain: settings.failoverChain,
     };
 
     // Only send API keys if they were changed (not masked)
@@ -102,6 +141,55 @@ export default function SettingsPage() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     }
+  };
+
+  const handleOAuthDisconnect = async (provider: LLMProviderName) => {
+    try {
+      const res = await fetch(`/api/oauth/${provider}/disconnect`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error("Failed to disconnect");
+      setOauthStatus((prev) => ({
+        ...prev,
+        [provider]: { ...prev[provider], connected: false, tier: null },
+      }));
+      setSettings((prev) =>
+        prev
+          ? { ...prev, [`${provider}AuthMode`]: "api_key" as AuthMode }
+          : prev
+      );
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const getAuthMode = (provider: LLMProviderName): AuthMode => {
+    if (!settings) return "api_key";
+    const key = `${provider}AuthMode` as keyof Settings;
+    return (settings[key] as AuthMode) || "api_key";
+  };
+
+  const moveFailoverProvider = (index: number, direction: "up" | "down") => {
+    if (!settings) return;
+    const chain = [...settings.failoverChain];
+    const newIndex = direction === "up" ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= chain.length) return;
+    [chain[index], chain[newIndex]] = [chain[newIndex], chain[index]];
+    setSettings({ ...settings, failoverChain: chain });
+    persistSettings({ failoverChain: chain });
+  };
+
+  const toggleFailoverProvider = (provider: LLMProviderName) => {
+    if (!settings) return;
+    const chain = [...settings.failoverChain];
+    const index = chain.indexOf(provider);
+    if (index >= 0) {
+      chain.splice(index, 1);
+    } else {
+      chain.push(provider);
+    }
+    setSettings({ ...settings, failoverChain: chain });
+    persistSettings({ failoverChain: chain });
   };
 
   // Compute the model list for the current provider
@@ -138,6 +226,12 @@ export default function SettingsPage() {
           </div>
         )}
 
+        {oauthMessage && (
+          <div className="mb-4 rounded-md border border-green-500/50 bg-green-500/10 p-3 text-sm text-green-700">
+            {oauthMessage}
+          </div>
+        )}
+
         {/* Provider Selection */}
         <section className="mb-6">
           <h2 className="mb-3 text-sm font-medium">Active Provider</h2>
@@ -152,7 +246,6 @@ export default function SettingsPage() {
                 onClick={() => {
                   const newProvider = p.name;
                   const fallback = STATIC_MODEL_OPTIONS[newProvider][0];
-                  // For ollama, keep current model if already ollama, or use first fetched model
                   const newModel =
                     newProvider === "ollama"
                       ? ollamaModels[0] || settings.activeModel
@@ -165,7 +258,15 @@ export default function SettingsPage() {
                   persistSettings({ activeProvider: newProvider, activeModel: newModel });
                 }}
               >
-                {p.label}
+                <div className="flex items-center justify-between">
+                  <span>{p.label}</span>
+                  {oauthStatus[p.name]?.connected && (
+                    <SubscriptionBadge
+                      tier={oauthStatus[p.name]?.tier || null}
+                      provider={p.name}
+                    />
+                  )}
+                </div>
               </button>
             ))}
           </div>
@@ -197,53 +298,326 @@ export default function SettingsPage() {
 
         <Separator className="my-6" />
 
-        {/* API Keys */}
+        {/* Provider Failover */}
         <section className="mb-6">
-          <h2 className="mb-3 text-sm font-medium">API Keys</h2>
+          <h2 className="mb-3 text-sm font-medium">Provider Failover</h2>
           <div className="space-y-3">
-            {PROVIDERS.filter((p) => p.name !== "ollama").map((p) => (
-              <div key={p.name}>
-                <label className="mb-1 block text-xs text-muted-foreground">
-                  {p.label} API Key
-                </label>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <Input
-                      type={showKeys[p.keyField] ? "text" : "password"}
-                      value={
-                        apiKeys[p.keyField] ??
-                        (settings as any)[p.keyField] ??
-                        ""
-                      }
-                      onChange={(e) =>
-                        setApiKeys({ ...apiKeys, [p.keyField]: e.target.value })
-                      }
-                      placeholder={`Enter ${p.label} API key...`}
-                      className="pr-10"
-                    />
-                    <button
-                      className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
-                      onClick={() =>
-                        setShowKeys({
-                          ...showKeys,
-                          [p.keyField]: !showKeys[p.keyField],
-                        })
-                      }
-                    >
-                      {showKeys[p.keyField] ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </button>
-                  </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm">Enable Automatic Failover</div>
+                <div className="text-xs text-muted-foreground">
+                  Automatically try alternate providers if the primary fails
                 </div>
               </div>
-            ))}
-            <div>
-              <label className="mb-1 block text-xs text-muted-foreground">
-                Ollama Base URL
-              </label>
+              <Switch
+                checked={settings.failoverEnabled}
+                onCheckedChange={(checked: boolean) => {
+                  setSettings({ ...settings, failoverEnabled: checked });
+                  persistSettings({ failoverEnabled: checked });
+                }}
+              />
+            </div>
+
+            {settings.failoverEnabled && (
+              <div className="rounded-md border border-border p-3">
+                <div className="mb-2 text-xs text-muted-foreground">
+                  Failover priority (primary provider is always tried first):
+                </div>
+                <div className="space-y-1">
+                  {PROVIDERS.filter((p) => p.name !== settings.activeProvider).map((p) => {
+                    const isInChain = settings.failoverChain.includes(p.name);
+                    const chainIndex = settings.failoverChain.indexOf(p.name);
+                    return (
+                      <div
+                        key={p.name}
+                        className={`flex items-center justify-between rounded px-2 py-1.5 text-sm ${isInChain ? "bg-accent" : ""
+                          }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={isInChain}
+                            onChange={() => toggleFailoverProvider(p.name)}
+                            className="rounded"
+                          />
+                          <span>{p.label}</span>
+                          {oauthStatus[p.name]?.connected && (
+                            <SubscriptionBadge
+                              tier={oauthStatus[p.name]?.tier || null}
+                              provider={p.name}
+                            />
+                          )}
+                        </div>
+                        {isInChain && (
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-muted-foreground mr-1">
+                              #{chainIndex + 1}
+                            </span>
+                            <button
+                              className="p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                              disabled={chainIndex === 0}
+                              onClick={() => moveFailoverProvider(chainIndex, "up")}
+                            >
+                              <GripVertical className="h-3 w-3 rotate-180" />
+                            </button>
+                            <button
+                              className="p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                              disabled={chainIndex === settings.failoverChain.length - 1}
+                              onClick={() => moveFailoverProvider(chainIndex, "down")}
+                            >
+                              <GripVertical className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <Separator className="my-6" />
+
+        {/* Auto-Summary */}
+        <section className="mb-6">
+          <h2 className="mb-3 text-sm font-medium">Auto-Summary</h2>
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              Summary Length:{" "}
+              <span className="font-medium text-foreground">
+                {settings.summarySentences} sentence{settings.summarySentences === 1 ? "" : "s"}
+              </span>
+            </label>
+            <input
+              type="range"
+              min={1}
+              max={10}
+              step={1}
+              value={settings.summarySentences}
+              onChange={(e) => {
+                const value = parseInt(e.target.value, 10);
+                setSettings({ ...settings, summarySentences: value });
+              }}
+              onMouseUp={(e) => {
+                persistSettings({ summarySentences: parseInt((e.target as HTMLInputElement).value, 10) });
+              }}
+              onTouchEnd={(e) => {
+                persistSettings({ summarySentences: parseInt((e.target as HTMLInputElement).value, 10) });
+              }}
+              className="w-full accent-primary"
+            />
+            <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
+              <span>1</span>
+              <span>5</span>
+              <span>10</span>
+            </div>
+          </div>
+        </section>
+
+        <Separator className="my-6" />
+
+        {/* Authentication */}
+        <section className="mb-6">
+          <h2 className="mb-3 text-sm font-medium">Authentication</h2>
+          <div className="space-y-4">
+            {PROVIDERS.filter((p) => p.name !== "ollama").map((p) => {
+              const authMode = getAuthMode(p.name);
+              const providerOAuth = oauthStatus[p.name];
+              const oauthAvailable = providerOAuth?.available ?? false;
+              const oauthClientIdKey = `${p.name}OauthClientId`;
+              const oauthClientSecretKey = `${p.name}OauthClientSecret`;
+              const hasOAuthCredentials = oauthAvailable || !!(apiKeys[oauthClientIdKey] && apiKeys[oauthClientSecretKey]);
+
+              return (
+                <div key={p.name} className="rounded-md border border-border p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{p.label}</span>
+                      {providerOAuth?.connected && (
+                        <SubscriptionBadge
+                          tier={providerOAuth.tier}
+                          provider={p.name}
+                        />
+                      )}
+                    </div>
+                    {/* Auth mode toggle */}
+                    <div className="flex rounded-md border border-input text-xs">
+                      <button
+                        className={`rounded-l-md px-2.5 py-1 transition-colors ${authMode === "api_key"
+                          ? "bg-primary text-primary-foreground"
+                          : "hover:bg-accent"
+                          }`}
+                        onClick={() => {
+                          const key = `${p.name}AuthMode` as keyof Settings;
+                          setSettings({ ...settings, [key]: "api_key" as AuthMode });
+                          persistSettings({ [key]: "api_key" });
+                        }}
+                      >
+                        API Key
+                      </button>
+                      <button
+                        className={`rounded-r-md px-2.5 py-1 transition-colors ${authMode === "oauth"
+                          ? "bg-primary text-primary-foreground"
+                          : "hover:bg-accent"
+                          }`}
+                        onClick={() => {
+                          const key = `${p.name}AuthMode` as keyof Settings;
+                          setSettings({ ...settings, [key]: "oauth" as AuthMode });
+                          persistSettings({ [key]: "oauth" });
+                        }}
+                      >
+                        OAuth
+                      </button>
+                    </div>
+                  </div>
+
+                  {authMode === "api_key" ? (
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Input
+                          type={showKeys[p.keyField] ? "text" : "password"}
+                          value={apiKeys[p.keyField] ?? ""}
+                          onChange={(e) =>
+                            setApiKeys({ ...apiKeys, [p.keyField]: e.target.value })
+                          }
+                          placeholder={
+                            (settings as any)[p.keyField]
+                              ? "Key saved — enter a new key to replace"
+                              : `Enter ${p.label} API key...`
+                          }
+                          className="pr-10"
+                        />
+                        <button
+                          className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
+                          onClick={() =>
+                            setShowKeys({
+                              ...showKeys,
+                              [p.keyField]: !showKeys[p.keyField],
+                            })
+                          }
+                        >
+                          {showKeys[p.keyField] ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ) : providerOAuth?.connected ? (
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs text-muted-foreground">
+                        Authenticated via OAuth
+                        {providerOAuth.tier && providerOAuth.tier !== "unknown"
+                          ? ` (${providerOAuth.tier} plan)`
+                          : ""}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs text-destructive hover:text-destructive"
+                        onClick={() => handleOAuthDisconnect(p.name)}
+                      >
+                        <LogOut className="mr-1 h-3 w-3" />
+                        Disconnect
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {!oauthAvailable && (
+                        <>
+                          <div className="text-xs text-muted-foreground">
+                            Enter your OAuth app credentials to enable sign-in:
+                          </div>
+                          <div className="space-y-1.5">
+                            <div className="relative">
+                              <Input
+                                type={showKeys[oauthClientIdKey] ? "text" : "password"}
+                                value={apiKeys[oauthClientIdKey] ?? ""}
+                                onChange={(e) =>
+                                  setApiKeys({ ...apiKeys, [oauthClientIdKey]: e.target.value })
+                                }
+                                placeholder={
+                                  (settings as any)[oauthClientIdKey]
+                                    ? "Saved — enter new to replace"
+                                    : "OAuth Client ID"
+                                }
+                                className="pr-10 text-xs"
+                              />
+                              <button
+                                className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
+                                onClick={() =>
+                                  setShowKeys({ ...showKeys, [oauthClientIdKey]: !showKeys[oauthClientIdKey] })
+                                }
+                              >
+                                {showKeys[oauthClientIdKey] ? (
+                                  <EyeOff className="h-3 w-3" />
+                                ) : (
+                                  <Eye className="h-3 w-3" />
+                                )}
+                              </button>
+                            </div>
+                            <div className="relative">
+                              <Input
+                                type={showKeys[oauthClientSecretKey] ? "text" : "password"}
+                                value={apiKeys[oauthClientSecretKey] ?? ""}
+                                onChange={(e) =>
+                                  setApiKeys({ ...apiKeys, [oauthClientSecretKey]: e.target.value })
+                                }
+                                placeholder={
+                                  (settings as any)[oauthClientSecretKey]
+                                    ? "Saved — enter new to replace"
+                                    : "OAuth Client Secret"
+                                }
+                                className="pr-10 text-xs"
+                              />
+                              <button
+                                className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
+                                onClick={() =>
+                                  setShowKeys({ ...showKeys, [oauthClientSecretKey]: !showKeys[oauthClientSecretKey] })
+                                }
+                              >
+                                {showKeys[oauthClientSecretKey] ? (
+                                  <EyeOff className="h-3 w-3" />
+                                ) : (
+                                  <Eye className="h-3 w-3" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs"
+                        onClick={async () => {
+                          // Save any unsaved OAuth credentials first
+                          if (apiKeys[oauthClientIdKey] || apiKeys[oauthClientSecretKey]) {
+                            const ok = await persistSettings({
+                              [oauthClientIdKey]: apiKeys[oauthClientIdKey],
+                              [oauthClientSecretKey]: apiKeys[oauthClientSecretKey],
+                            });
+                            if (!ok) return;
+                          }
+                          window.location.href = `/api/oauth/${p.name}/authorize`;
+                        }}
+                        disabled={!oauthAvailable && !hasOAuthCredentials}
+                      >
+                        <LogIn className="mr-1.5 h-3 w-3" />
+                        {oauthAvailable ? `Sign in with ${p.label}` : "Save & Sign in"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Ollama (no auth needed) */}
+            <div className="rounded-md border border-border p-3">
+              <div className="mb-2 text-sm font-medium">Ollama (Local)</div>
               <Input
                 value={apiKeys.ollamaBaseUrl ?? settings.ollamaBaseUrl}
                 onChange={(e) =>
@@ -293,6 +667,7 @@ export default function SettingsPage() {
                     }
                   >
                     <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic (Voyage AI)</option>
                     <option value="gemini">Gemini</option>
                     <option value="ollama">Ollama</option>
                   </select>

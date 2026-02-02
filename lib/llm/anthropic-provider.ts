@@ -95,10 +95,32 @@ export class AnthropicProvider extends BaseLLMProvider {
     }
   }
 
-  async embed(_req: EmbeddingRequest): Promise<EmbeddingResponse> {
-    throw new Error(
-      "Anthropic does not provide an embeddings API. Configure a different embedding provider in settings."
-    );
+  async embed(req: EmbeddingRequest): Promise<EmbeddingResponse> {
+    const model = req.model || "voyage-3-lite";
+    const response = await fetch("https://api.voyageai.com/v1/embeddings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.client.apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        input: [req.text],
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`Voyage AI embeddings error (${response.status}): ${err}`);
+    }
+
+    const data = await response.json();
+    const embedding = data.data[0].embedding;
+
+    return {
+      embedding,
+      dimensions: embedding.length,
+    };
   }
 
   async listModels(): Promise<string[]> {

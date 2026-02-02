@@ -1,6 +1,6 @@
 import { getDb } from "@/db";
 import { encrypt, decrypt } from "@/lib/crypto";
-import type { Settings, LLMProviderName } from "@/types";
+import type { Settings, LLMProviderName, AuthMode } from "@/types";
 
 interface SettingsRow {
   active_provider: string;
@@ -17,11 +17,30 @@ interface SettingsRow {
   temporal_weight: number;
   preview_provider: string;
   preview_model: string;
+  summary_sentences: number;
+  openai_auth_mode: string;
+  anthropic_auth_mode: string;
+  gemini_auth_mode: string;
+  failover_enabled: number;
+  failover_chain: string;
+  openai_oauth_client_id: string | null;
+  openai_oauth_client_secret: string | null;
+  anthropic_oauth_client_id: string | null;
+  anthropic_oauth_client_secret: string | null;
+  gemini_oauth_client_id: string | null;
+  gemini_oauth_client_secret: string | null;
 }
 
 export function getSettings(): Settings {
   const db = getDb();
   const row = db.prepare("SELECT * FROM settings WHERE id = 1").get() as SettingsRow;
+
+  let failoverChain: LLMProviderName[] = [];
+  try {
+    failoverChain = JSON.parse(row.failover_chain || "[]");
+  } catch {
+    failoverChain = [];
+  }
 
   return {
     activeProvider: row.active_provider as LLMProviderName,
@@ -38,6 +57,18 @@ export function getSettings(): Settings {
     temporalWeight: row.temporal_weight,
     previewProvider: row.preview_provider as LLMProviderName,
     previewModel: row.preview_model,
+    summarySentences: row.summary_sentences,
+    openaiAuthMode: (row.openai_auth_mode || "api_key") as AuthMode,
+    anthropicAuthMode: (row.anthropic_auth_mode || "api_key") as AuthMode,
+    geminiAuthMode: (row.gemini_auth_mode || "api_key") as AuthMode,
+    openaiOauthClientId: row.openai_oauth_client_id ? decrypt(row.openai_oauth_client_id) : null,
+    openaiOauthClientSecret: row.openai_oauth_client_secret ? decrypt(row.openai_oauth_client_secret) : null,
+    anthropicOauthClientId: row.anthropic_oauth_client_id ? decrypt(row.anthropic_oauth_client_id) : null,
+    anthropicOauthClientSecret: row.anthropic_oauth_client_secret ? decrypt(row.anthropic_oauth_client_secret) : null,
+    geminiOauthClientId: row.gemini_oauth_client_id ? decrypt(row.gemini_oauth_client_id) : null,
+    geminiOauthClientSecret: row.gemini_oauth_client_secret ? decrypt(row.gemini_oauth_client_secret) : null,
+    failoverEnabled: row.failover_enabled === 1,
+    failoverChain,
   };
 }
 
@@ -101,6 +132,54 @@ export function updateSettings(settings: Partial<Settings>): void {
   if (settings.previewModel !== undefined) {
     updates.push("preview_model = ?");
     values.push(settings.previewModel);
+  }
+  if (settings.summarySentences !== undefined) {
+    updates.push("summary_sentences = ?");
+    values.push(settings.summarySentences);
+  }
+  if (settings.openaiAuthMode !== undefined) {
+    updates.push("openai_auth_mode = ?");
+    values.push(settings.openaiAuthMode);
+  }
+  if (settings.anthropicAuthMode !== undefined) {
+    updates.push("anthropic_auth_mode = ?");
+    values.push(settings.anthropicAuthMode);
+  }
+  if (settings.geminiAuthMode !== undefined) {
+    updates.push("gemini_auth_mode = ?");
+    values.push(settings.geminiAuthMode);
+  }
+  if (settings.openaiOauthClientId !== undefined) {
+    updates.push("openai_oauth_client_id = ?");
+    values.push(settings.openaiOauthClientId ? encrypt(settings.openaiOauthClientId) : null);
+  }
+  if (settings.openaiOauthClientSecret !== undefined) {
+    updates.push("openai_oauth_client_secret = ?");
+    values.push(settings.openaiOauthClientSecret ? encrypt(settings.openaiOauthClientSecret) : null);
+  }
+  if (settings.anthropicOauthClientId !== undefined) {
+    updates.push("anthropic_oauth_client_id = ?");
+    values.push(settings.anthropicOauthClientId ? encrypt(settings.anthropicOauthClientId) : null);
+  }
+  if (settings.anthropicOauthClientSecret !== undefined) {
+    updates.push("anthropic_oauth_client_secret = ?");
+    values.push(settings.anthropicOauthClientSecret ? encrypt(settings.anthropicOauthClientSecret) : null);
+  }
+  if (settings.geminiOauthClientId !== undefined) {
+    updates.push("gemini_oauth_client_id = ?");
+    values.push(settings.geminiOauthClientId ? encrypt(settings.geminiOauthClientId) : null);
+  }
+  if (settings.geminiOauthClientSecret !== undefined) {
+    updates.push("gemini_oauth_client_secret = ?");
+    values.push(settings.geminiOauthClientSecret ? encrypt(settings.geminiOauthClientSecret) : null);
+  }
+  if (settings.failoverEnabled !== undefined) {
+    updates.push("failover_enabled = ?");
+    values.push(settings.failoverEnabled ? 1 : 0);
+  }
+  if (settings.failoverChain !== undefined) {
+    updates.push("failover_chain = ?");
+    values.push(JSON.stringify(settings.failoverChain));
   }
 
   if (updates.length === 0) return;

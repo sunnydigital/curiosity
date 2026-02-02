@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSettings } from "@/db/queries/settings";
 import { getPreviewProvider } from "@/lib/llm/provider-registry";
-import { SELECTION_SUMMARY_PROMPT } from "@/lib/constants";
+import { getSelectionSummaryPrompt } from "@/lib/constants";
 
 export async function POST(
   request: NextRequest,
@@ -29,15 +29,17 @@ export async function POST(
 
   const settings = getSettings();
   const provider = getPreviewProvider(settings);
+  const sentences = settings.summarySentences ?? 2;
+  const summaryPrompt = getSelectionSummaryPrompt(sentences);
 
   try {
     const response = await provider.complete({
       model: settings.previewModel,
       messages: [
-        { role: "system", content: SELECTION_SUMMARY_PROMPT },
+        { role: "system", content: summaryPrompt },
         { role: "user", content: textToSummarize },
       ],
-      maxTokens: 100,
+      maxTokens: Math.min(50 * sentences, 500),
     });
 
     return NextResponse.json({ summary: response.content.trim() });

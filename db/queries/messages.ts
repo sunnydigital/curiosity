@@ -202,6 +202,17 @@ export function updatePreviewSummary(
   );
 }
 
+export function deleteMessage(messageId: string): boolean {
+  const db = getDb();
+  // Only delete if the message has no children
+  const childCount = db
+    .prepare("SELECT COUNT(*) as cnt FROM messages WHERE parent_id = ?")
+    .get(messageId) as { cnt: number };
+  if (childCount.cnt > 0) return false;
+  db.prepare("DELETE FROM messages WHERE id = ?").run(messageId);
+  return true;
+}
+
 export function deleteBranch(messageId: string): void {
   const db = getDb();
   // Delete the message and all its descendants using recursive CTE

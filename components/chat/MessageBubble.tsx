@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GitBranch, Copy, Check } from "lucide-react";
+import { GitBranch, Copy, Check, RotateCcw, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/types";
@@ -12,6 +12,7 @@ import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { TypingBubbles } from "./TypingBubbles";
 
 interface MessageBubbleProps {
   message: Message;
@@ -25,6 +26,9 @@ interface MessageBubbleProps {
     charStart: number;
     charEnd: number;
   }) => void;
+  isFailed?: boolean;
+  onRetry?: (messageId: string) => void;
+  onEditResend?: (messageId: string) => void;
 }
 
 // Preprocess content to fix common LaTeX escaping issues from LLMs
@@ -104,6 +108,9 @@ export function MessageBubble({
   branches,
   onBranchClick,
   onTextSelect,
+  isFailed,
+  onRetry,
+  onEditResend,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const rawContent = isStreaming ? streamingContent || "" : message.content;
@@ -151,11 +158,11 @@ export function MessageBubble({
         isUser ? "justify-end" : "justify-start"
       )}
     >
-      <div className="flex shrink-0 pt-3 opacity-0 transition-opacity group-hover:opacity-100">
+      <div className="flex shrink-0 items-center gap-0.5 pt-3 opacity-0 transition-opacity group-hover:opacity-100">
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 w-6"
+          className="h-6 w-6 text-muted-foreground hover:text-foreground"
           onClick={handleCopy}
         >
           {copied ? (
@@ -164,6 +171,28 @@ export function MessageBubble({
             <Copy className="h-3 w-3" />
           )}
         </Button>
+        {onRetry && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+            onClick={() => onRetry(message.id)}
+            title="Retry"
+          >
+            <RotateCcw className="h-3 w-3" />
+          </Button>
+        )}
+        {onEditResend && isUser && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 text-muted-foreground hover:text-foreground"
+            onClick={() => onEditResend(message.id)}
+            title="Edit & Resend"
+          >
+            <Pencil className="h-3 w-3" />
+          </Button>
+        )}
       </div>
       <div
         className={cn(
@@ -174,7 +203,7 @@ export function MessageBubble({
         )}
       >
         {message.isBranchRoot && (
-          <div className="mb-1 flex items-center gap-1 text-xs opacity-70">
+          <div className="mt-2 -mb-2 flex items-center gap-1 text-xs opacity-70">
             <GitBranch className="h-3 w-3" />
             <span>Branch</span>
           </div>
@@ -251,9 +280,7 @@ export function MessageBubble({
           >
             {content}
           </ReactMarkdown>
-          {isStreaming && (
-            <span className="inline-block h-4 w-1 animate-pulse bg-current" />
-          )}
+          {isStreaming && <TypingBubbles />}
         </div>
 
         {branches && branches.length > 0 && (
@@ -270,6 +297,12 @@ export function MessageBubble({
                 {branch.branchContext?.slice(0, 20) || "Branch"}
               </Button>
             ))}
+          </div>
+        )}
+
+        {isFailed && (
+          <div className="mt-2">
+            <span className="text-xs text-destructive">Failed to get response</span>
           </div>
         )}
       </div>

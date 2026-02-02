@@ -267,7 +267,6 @@ export function TextSelectionToolbar({
                 className="h-7 gap-1 text-xs pr-2"
                 onClick={() => handleShortcutClick(sc)}
               >
-                {sc.builtinType ? null : <span className="mr-0.5">🌐</span>}
                 {truncate(sc.label, 20)}
                 <kbd
                   className={`ml-1 rounded border px-1 text-[10px] ${KBD_COLORS[idx % KBD_COLORS.length]}`}

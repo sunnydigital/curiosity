@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(git config:*)",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(ss:*)",
+      "Bash(curl:*)",
+      "Bash(sqlite3:*)",
+      "Bash(npm run build:*)"
     ]
   }
 }
