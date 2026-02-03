@@ -116,17 +116,20 @@ export class FailoverExecutor {
       addIfNew(p);
     }
 
-    // Auto-include any provider with a configured credential
+    // Auto-include any provider with a configured credential (API key or OAuth)
     const allProviders: LLMProviderName[] = ["openai", "anthropic", "gemini", "ollama"];
     for (const p of allProviders) {
       if (seen.has(p)) continue;
+      const authModeKey = `${p}AuthMode` as keyof Settings;
+      const authMode = this.settings[authModeKey] as string;
+      const isOAuth = authMode === "oauth" || authMode === "oauth_gemini_cli" || authMode === "oauth_antigravity";
       if (p === "ollama" && this.settings.ollamaBaseUrl) {
         addIfNew(p);
-      } else if (p === "openai" && this.settings.openaiApiKey) {
+      } else if (p === "openai" && (this.settings.openaiApiKey || isOAuth)) {
         addIfNew(p);
-      } else if (p === "anthropic" && this.settings.anthropicApiKey) {
+      } else if (p === "anthropic" && (this.settings.anthropicApiKey || isOAuth)) {
         addIfNew(p);
-      } else if (p === "gemini" && this.settings.geminiApiKey) {
+      } else if (p === "gemini" && (this.settings.geminiApiKey || isOAuth)) {
         addIfNew(p);
       }
     }

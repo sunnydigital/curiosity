@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { getSettings } from "@/db/queries/settings";
 import { getAllOAuthStatus } from "@/db/queries/oauth-tokens";
 import { isOAuthAvailable } from "@/lib/oauth/config";
 import type { LLMProviderName } from "@/types";
@@ -8,14 +7,13 @@ const PROVIDERS: LLMProviderName[] = ["openai", "anthropic", "gemini", "ollama"]
 
 export async function GET() {
   try {
-    const settings = getSettings();
     const connectionStatus = getAllOAuthStatus();
 
     const status = PROVIDERS.reduce(
       (acc, provider) => {
         acc[provider] = {
           ...connectionStatus[provider],
-          available: isOAuthAvailable(provider, settings),
+          available: isOAuthAvailable(provider),
         };
         return acc;
       },

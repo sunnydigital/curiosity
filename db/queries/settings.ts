@@ -29,6 +29,12 @@ interface SettingsRow {
   anthropic_oauth_client_secret: string | null;
   gemini_oauth_client_id: string | null;
   gemini_oauth_client_secret: string | null;
+  default_openai_model: string;
+  default_anthropic_model: string;
+  default_gemini_model: string;
+  default_ollama_model: string;
+  embedding_provider_override: number;
+  preview_provider_override: number;
 }
 
 export function getSettings(): Settings {
@@ -52,11 +58,13 @@ export function getSettings(): Settings {
     memoryEnabled: row.memory_enabled === 1,
     embeddingProvider: row.embedding_provider as LLMProviderName,
     embeddingModel: row.embedding_model,
+    embeddingProviderOverride: row.embedding_provider_override === 1,
     decayLambda: row.decay_lambda,
     similarityWeight: row.similarity_weight,
     temporalWeight: row.temporal_weight,
     previewProvider: row.preview_provider as LLMProviderName,
     previewModel: row.preview_model,
+    previewProviderOverride: row.preview_provider_override === 1,
     summarySentences: row.summary_sentences,
     openaiAuthMode: (row.openai_auth_mode || "api_key") as AuthMode,
     anthropicAuthMode: (row.anthropic_auth_mode || "api_key") as AuthMode,
@@ -67,6 +75,10 @@ export function getSettings(): Settings {
     anthropicOauthClientSecret: row.anthropic_oauth_client_secret ? decrypt(row.anthropic_oauth_client_secret) : null,
     geminiOauthClientId: row.gemini_oauth_client_id ? decrypt(row.gemini_oauth_client_id) : null,
     geminiOauthClientSecret: row.gemini_oauth_client_secret ? decrypt(row.gemini_oauth_client_secret) : null,
+    defaultOpenaiModel: row.default_openai_model || "gpt-5-mini",
+    defaultAnthropicModel: row.default_anthropic_model || "claude-sonnet-4-5-20250929",
+    defaultGeminiModel: row.default_gemini_model || "gemini-2.5-flash",
+    defaultOllamaModel: row.default_ollama_model || "llama3.2",
     failoverEnabled: row.failover_enabled === 1,
     failoverChain,
   };
@@ -172,6 +184,30 @@ export function updateSettings(settings: Partial<Settings>): void {
   if (settings.geminiOauthClientSecret !== undefined) {
     updates.push("gemini_oauth_client_secret = ?");
     values.push(settings.geminiOauthClientSecret ? encrypt(settings.geminiOauthClientSecret) : null);
+  }
+  if (settings.defaultOpenaiModel !== undefined) {
+    updates.push("default_openai_model = ?");
+    values.push(settings.defaultOpenaiModel);
+  }
+  if (settings.defaultAnthropicModel !== undefined) {
+    updates.push("default_anthropic_model = ?");
+    values.push(settings.defaultAnthropicModel);
+  }
+  if (settings.defaultGeminiModel !== undefined) {
+    updates.push("default_gemini_model = ?");
+    values.push(settings.defaultGeminiModel);
+  }
+  if (settings.defaultOllamaModel !== undefined) {
+    updates.push("default_ollama_model = ?");
+    values.push(settings.defaultOllamaModel);
+  }
+  if (settings.embeddingProviderOverride !== undefined) {
+    updates.push("embedding_provider_override = ?");
+    values.push(settings.embeddingProviderOverride ? 1 : 0);
+  }
+  if (settings.previewProviderOverride !== undefined) {
+    updates.push("preview_provider_override = ?");
+    values.push(settings.previewProviderOverride ? 1 : 0);
   }
   if (settings.failoverEnabled !== undefined) {
     updates.push("failover_enabled = ?");

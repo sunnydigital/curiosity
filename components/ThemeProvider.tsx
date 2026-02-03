@@ -27,7 +27,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem("curiositylm-theme") as Theme | null;
+    const stored = localStorage.getItem("curiosity-theme") as Theme | null;
     if (stored === "light" || stored === "dark") {
       setThemeState(stored);
     }
@@ -39,7 +39,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const root = document.documentElement;
     root.classList.remove("light", "dark");
     root.classList.add(theme);
-    localStorage.setItem("curiositylm-theme", theme);
+    localStorage.setItem("curiosity-theme", theme);
   }, [theme, mounted]);
 
   const setTheme = (t: Theme) => setThemeState(t);

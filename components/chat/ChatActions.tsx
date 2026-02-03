@@ -37,7 +37,7 @@ function buildShareText(title: string, messages: Message[]): string {
   const excerpt = firstUser
     ? firstUser.content.slice(0, 100) + (firstUser.content.length > 100 ? "..." : "")
     : "";
-  return `${title}${excerpt ? `\n\n"${excerpt}"` : ""}\n\nExplored with CuriosityLM`;
+  return `${title}${excerpt ? `\n\n"${excerpt}"` : ""}\n\nExplored with Curiosity`;
 }
 
 export function ChatActions({ chatId, chatTitle, messages }: ChatActionsProps) {

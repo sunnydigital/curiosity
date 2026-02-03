@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Settings, GitBranch, Brain, Sun, Moon } from "lucide-react";
+import { Settings as SettingsIcon, GitBranch, Brain, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -12,6 +12,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useTheme } from "@/components/ThemeProvider";
+import { ProviderSwitcher } from "@/components/chat/ProviderSwitcher";
+import { DEFAULT_MODELS } from "@/lib/llm/model-equivalents";
+import type { LLMProviderName, Settings } from "@/types";
 
 export function TopBar() {
   const [settings, setSettings] = useState<any>(null);
@@ -30,16 +33,57 @@ export function TopBar() {
     fetchSettings();
   }, [pathname, fetchSettings]);
 
+  // Listen for provider-switched events (from Settings page or other sources)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { provider, model } = (e as CustomEvent).detail;
+      setSettings((prev: any) =>
+        prev ? { ...prev, activeProvider: provider, activeModel: model } : prev
+      );
+    };
+    window.addEventListener("provider-switched", handler);
+    return () => window.removeEventListener("provider-switched", handler);
+  }, []);
+
+  const handleProviderSwitch = useCallback(
+    async (provider: LLMProviderName) => {
+      // Resolve the model from current state via the updater to avoid stale closures
+      let model = DEFAULT_MODELS[provider];
+      setSettings((prev: any) => {
+        if (!prev) return prev;
+        const defaultKey = `default${provider.charAt(0).toUpperCase() + provider.slice(1)}Model` as keyof Settings;
+        model = (prev as any)[defaultKey] || DEFAULT_MODELS[provider];
+        return { ...prev, activeProvider: provider, activeModel: model };
+      });
+      try {
+        await fetch("/api/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ activeProvider: provider, activeModel: model }),
+        });
+        // Notify ChatView of the switch
+        window.dispatchEvent(
+          new CustomEvent("provider-switched", { detail: { provider, model } })
+        );
+      } catch {
+        // Best-effort persist
+      }
+    },
+    []
+  );
+
   return (
     <TooltipProvider>
       <div className="flex h-12 items-center justify-between border-b border-border px-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">
-            {settings?.activeProvider && (
-              <>
-                {settings.activeProvider} / {settings.activeModel}
-              </>
-            )}
+        <div className="flex items-center gap-3">
+          {settings?.activeProvider && (
+            <ProviderSwitcher
+              activeProvider={settings.activeProvider}
+              onSwitch={handleProviderSwitch}
+            />
+          )}
+          <span className="text-xs text-muted-foreground">
+            {settings?.activeModel}
           </span>
         </div>
         <div className="flex items-center gap-1">
@@ -80,7 +124,7 @@ export function TopBar() {
             <TooltipTrigger asChild>
               <Link href="/settings">
                 <Button variant="ghost" size="icon">
-                  <Settings className="h-4 w-4" />
+                  <SettingsIcon className="h-4 w-4" />
                 </Button>
               </Link>
             </TooltipTrigger>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getChat, renameChat, deleteChat, starChat } from "@/db/queries/chats";
+import { assignChatToProject } from "@/db/queries/projects";
 
 export async function GET(
   _request: NextRequest,
@@ -24,6 +25,9 @@ export async function PATCH(
   }
   if (body.starred !== undefined) {
     starChat(chatId, body.starred);
+  }
+  if (body.projectId !== undefined) {
+    assignChatToProject(chatId, body.projectId);
   }
   const chat = getChat(chatId);
   return NextResponse.json(chat);

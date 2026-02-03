@@ -6,9 +6,9 @@ const TAG_LENGTH = 16;
 
 function getEncryptionKey(): Buffer {
   const key =
-    process.env.CURIOSITYLM_ENCRYPTION_KEY ||
+    process.env.CURIOSITY_ENCRYPTION_KEY ||
     "default-dev-key-change-in-production-please!!!!!";
-  return crypto.scryptSync(key, "curiositylm-salt", 32);
+  return crypto.scryptSync(key, "curiosity-salt", 32);
 }
 
 export function encrypt(text: string): string {

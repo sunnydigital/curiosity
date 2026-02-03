@@ -1,5 +1,5 @@
 {
-  "name": "curiositylm",
+  "name": "curiosity",
   "version": "1.0.0",
   "description": "A notebook for the curious",
   "private": true,
@@ -11,18 +11,19 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sunnydigital/curiosityLM.git"
+    "url": "git+https://github.com/sunnydigital/curiosity.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/sunnydigital/curiosityLM/issues"
+    "url": "https://github.com/sunnydigital/curiosity/issues"
   },
-  "homepage": "https://github.com/sunnydigital/curiosityLM#readme",
+  "homepage": "https://github.com/sunnydigital/curiosity#readme",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.72.1",
     "@google/generative-ai": "^0.24.1",
+    "@mariozechner/pi-ai": "^0.51.2",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-label": "^2.1.8",
@@ -64,6 +65,7 @@
     "eslint": "^9.39.2",
     "eslint-config-next": "^16.1.6",
     "postcss": "^8.5.6",
+    "rehype-stringify": "^10.0.1",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3"
   }

@@ -6,6 +6,7 @@ interface ChatRow {
   id: string;
   title: string;
   starred: number;
+  project_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -15,6 +16,7 @@ function rowToChat(row: ChatRow): Chat {
     id: row.id,
     title: row.title,
     starred: row.starred === 1,
+    projectId: row.project_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

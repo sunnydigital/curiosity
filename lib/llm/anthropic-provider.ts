@@ -12,9 +12,20 @@ export class AnthropicProvider extends BaseLLMProvider {
   name = "anthropic" as const;
   private client: Anthropic;
 
-  constructor(apiKey: string) {
+  constructor(credential: string, useBearer = false) {
     super();
-    this.client = new Anthropic({ apiKey });
+    this.client = useBearer
+      ? new Anthropic({
+          authToken: credential,
+          apiKey: null,
+          defaultHeaders: {
+            "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
+            "anthropic-dangerous-direct-browser-access": "true",
+            "user-agent": "claude-cli/2.1.2 (external, cli)",
+            "x-app": "cli",
+          },
+        })
+      : new Anthropic({ apiKey: credential });
   }
 
   private formatMessage(m: { role: string; content: string; image?: { base64: string; mimeType: string } }) {
@@ -40,14 +51,20 @@ export class AnthropicProvider extends BaseLLMProvider {
     };
   }
 
+  private buildSystemPrompt(messages: LLMCompletionRequest["messages"]): string | undefined {
+    const systemMessages = messages.filter((m) => m.role === "system");
+    if (systemMessages.length === 0) return undefined;
+    return systemMessages.map((m) => m.content).join("\n\n");
+  }
+
   async complete(req: LLMCompletionRequest): Promise<LLMCompletionResponse> {
-    const systemMessage = req.messages.find((m) => m.role === "system");
+    const systemPrompt = this.buildSystemPrompt(req.messages);
     const nonSystemMessages = req.messages.filter((m) => m.role !== "system");
 
     const response = await this.client.messages.create({
       model: req.model,
       max_tokens: req.maxTokens || 4096,
-      system: systemMessage?.content,
+      ...(systemPrompt ? { system: systemPrompt } : {}),
       messages: nonSystemMessages.map((m) => this.formatMessage(m)) as any,
       temperature: req.temperature ?? 0.7,
     });
@@ -71,13 +88,13 @@ export class AnthropicProvider extends BaseLLMProvider {
   async *stream(
     req: LLMCompletionRequest
   ): AsyncGenerator<LLMStreamChunk, void, unknown> {
-    const systemMessage = req.messages.find((m) => m.role === "system");
+    const systemPrompt = this.buildSystemPrompt(req.messages);
     const nonSystemMessages = req.messages.filter((m) => m.role !== "system");
 
     const stream = this.client.messages.stream({
       model: req.model,
       max_tokens: req.maxTokens || 4096,
-      system: systemMessage?.content,
+      ...(systemPrompt ? { system: systemPrompt } : {}),
       messages: nonSystemMessages.map((m) => this.formatMessage(m)) as any,
       temperature: req.temperature ?? 0.7,
     });
@@ -123,12 +140,4 @@ export class AnthropicProvider extends BaseLLMProvider {
     };
   }
 
-  async listModels(): Promise<string[]> {
-    return [
-      "claude-opus-4-5-20251101",
-      "claude-sonnet-4-20250514",
-      "claude-haiku-3-5-20241022",
-      "claude-3-5-sonnet-20241022",
-    ];
-  }
 }

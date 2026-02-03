@@ -14,5 +14,9 @@ export abstract class BaseLLMProvider {
     req: LLMCompletionRequest
   ): AsyncGenerator<LLMStreamChunk, void, unknown>;
   abstract embed(req: EmbeddingRequest): Promise<EmbeddingResponse>;
-  abstract listModels(): Promise<string[]>;
+
+  /** Optional — only needed for providers not in pi-ai's registry (e.g. Ollama). */
+  async listModels(): Promise<string[]> {
+    return [];
+  }
 }

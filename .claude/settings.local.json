@@ -8,7 +8,23 @@
       "Bash(ss:*)",
       "Bash(curl:*)",
       "Bash(sqlite3:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(npx next build)",
+      "Bash(npx tsc:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:deepwiki.com)",
+      "Bash(node -e:*)",
+      "Bash(npm ls:*)",
+      "WebFetch(domain:lobste.rs)",
+      "WebFetch(domain:docs.openclaw.ai)",
+      "WebFetch(domain:www.alif.web.id)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "Bash(node:*)",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(npm run dev:*)"
     ]
   }
 }

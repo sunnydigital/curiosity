@@ -59,8 +59,8 @@ async function fetchAnthropicSubscription(
   // When available, this will query the appropriate API.
   const response = await fetch("https://api.anthropic.com/v1/account", {
     headers: {
-      "x-api-key": accessToken,
-      "anthropic-version": "2024-10-22",
+      Authorization: `Bearer ${accessToken}`,
+      "anthropic-version": "2023-06-01",
     },
   });
 
