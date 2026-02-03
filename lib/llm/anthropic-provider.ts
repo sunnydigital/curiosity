@@ -8,18 +8,22 @@ import type {
   EmbeddingResponse,
 } from "@/types";
 
+const CLAUDE_CODE_SYSTEM_PROMPT = "You are Claude Code, Anthropic's official CLI for Claude.";
+
 export class AnthropicProvider extends BaseLLMProvider {
   name = "anthropic" as const;
   private client: Anthropic;
+  private isOAuthToken: boolean;
 
   constructor(credential: string, useBearer = false) {
     super();
+    this.isOAuthToken = useBearer;
     this.client = useBearer
       ? new Anthropic({
           authToken: credential,
           apiKey: null,
           defaultHeaders: {
-            "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
+            "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,prompt-caching-2024-07-31",
             "anthropic-dangerous-direct-browser-access": "true",
             "user-agent": "claude-cli/2.1.2 (external, cli)",
             "x-app": "cli",
@@ -51,20 +55,33 @@ export class AnthropicProvider extends BaseLLMProvider {
     };
   }
 
-  private buildSystemPrompt(messages: LLMCompletionRequest["messages"]): string | undefined {
+  private buildSystemParam(messages: LLMCompletionRequest["messages"]): string | Anthropic.Messages.TextBlockParam[] | undefined {
     const systemMessages = messages.filter((m) => m.role === "system");
+
+    if (this.isOAuthToken) {
+      // OAuth tokens require Claude Code identity as the first system block
+      const blocks: Anthropic.Messages.TextBlockParam[] = [
+        { type: "text", text: CLAUDE_CODE_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+      ];
+      if (systemMessages.length > 0) {
+        const userSystem = systemMessages.map((m) => m.content).join("\n\n");
+        blocks.push({ type: "text", text: userSystem, cache_control: { type: "ephemeral" } });
+      }
+      return blocks;
+    }
+
     if (systemMessages.length === 0) return undefined;
     return systemMessages.map((m) => m.content).join("\n\n");
   }
 
   async complete(req: LLMCompletionRequest): Promise<LLMCompletionResponse> {
-    const systemPrompt = this.buildSystemPrompt(req.messages);
+    const systemParam = this.buildSystemParam(req.messages);
     const nonSystemMessages = req.messages.filter((m) => m.role !== "system");
 
     const response = await this.client.messages.create({
       model: req.model,
       max_tokens: req.maxTokens || 4096,
-      ...(systemPrompt ? { system: systemPrompt } : {}),
+      ...(systemParam ? { system: systemParam } : {}),
       messages: nonSystemMessages.map((m) => this.formatMessage(m)) as any,
       temperature: req.temperature ?? 0.7,
     });
@@ -88,13 +105,13 @@ export class AnthropicProvider extends BaseLLMProvider {
   async *stream(
     req: LLMCompletionRequest
   ): AsyncGenerator<LLMStreamChunk, void, unknown> {
-    const systemPrompt = this.buildSystemPrompt(req.messages);
+    const systemParam = this.buildSystemParam(req.messages);
     const nonSystemMessages = req.messages.filter((m) => m.role !== "system");
 
     const stream = this.client.messages.stream({
       model: req.model,
       max_tokens: req.maxTokens || 4096,
-      ...(systemPrompt ? { system: systemPrompt } : {}),
+      ...(systemParam ? { system: systemParam } : {}),
       messages: nonSystemMessages.map((m) => this.formatMessage(m)) as any,
       temperature: req.temperature ?? 0.7,
     });

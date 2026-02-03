@@ -1,14 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { SubscriptionBadge } from "@/components/settings/SubscriptionBadge";
 import { useTheme } from "@/components/ThemeProvider";
-import { ArrowLeft, Check, Eye, EyeOff, Trash2, LogIn, LogOut, GripVertical, KeyRound, ChevronDown } from "lucide-react";
+import { ArrowLeft, Check, Eye, EyeOff, Trash2, LogIn, LogOut, GripVertical, KeyRound, ChevronDown, Loader2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -138,6 +137,60 @@ function ProviderIcon({ provider, active }: { provider: LLMProviderName; active?
   );
 }
 
+function OllamaStatusBadge({ connected }: { connected: boolean | null }) {
+  if (connected === null) return null;
+  return connected ? (
+    <span className="inline-flex items-center rounded-full border border-green-300 bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+      Connected
+    </span>
+  ) : (
+    <span className="inline-flex items-center rounded-full border border-red-300 bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+      Not Connected
+    </span>
+  );
+}
+
+/**
+ * Badge that indicates connection type with color coding:
+ * - Blue: OAuth is the active auth method
+ * - Yellow: API key is the active auth method
+ * Color is determined by the current authMode toggle, not by which methods are available.
+ */
+function ConnectionBadge({
+  hasApiKey,
+  hasOAuth,
+  tier,
+  authMode,
+}: {
+  hasApiKey: boolean;
+  hasOAuth: boolean;
+  tier: SubscriptionTier | string | null;
+  authMode: AuthMode;
+}) {
+  // Only show badge if the method matching the current auth mode is connected
+  const isOAuthMode = authMode !== "api_key";
+  const isConnected = isOAuthMode ? hasOAuth : hasApiKey;
+  if (!isConnected) return null;
+
+  const resolvedTier = tier || "unknown";
+  const label =
+    resolvedTier === "unknown" || !isOAuthMode
+      ? "Connected"
+      : ({ free: "Free", plus: "Plus", pro: "Pro", max: "Max", enterprise: "Enterprise" }[resolvedTier] || "Connected");
+
+  const style = isOAuthMode
+    ? "bg-blue-100 text-blue-700 border-blue-300"
+    : "bg-yellow-100 text-yellow-700 border-yellow-300";
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${style}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 interface OAuthProviderStatus {
   connected: boolean;
   tier: SubscriptionTier | null;
@@ -157,10 +210,11 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsWithOAuth | null>(null);
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const [ollamaModels, setOllamaModels] = useState<string[]>([]);
   const [ollamaLoading, setOllamaLoading] = useState(false);
+  const [ollamaConnected, setOllamaConnected] = useState<boolean | null>(null);
   const [oauthStatus, setOauthStatus] = useState<OAuthStatusMap>({});
   const [oauthMessage, setOauthMessage] = useState<string | null>(null);
   const [dynamicModels, setDynamicModels] = useState<Record<string, string[]>>({});
@@ -170,9 +224,12 @@ export default function SettingsPage() {
   const [oauthSessionId, setOauthSessionId] = useState<Record<string, string>>({});
   const [oauthExchanging, setOauthExchanging] = useState<Record<string, boolean>>({});
   const [oauthInstructions, setOauthInstructions] = useState<Record<string, string>>({});
+  const [oauthProgress, setOauthProgress] = useState<Record<string, string>>({});
   const [anthropicSetupToken, setAnthropicSetupToken] = useState("");
   const [anthropicSetupSaving, setAnthropicSetupSaving] = useState(false);
   const [defaultModelFocus, setDefaultModelFocus] = useState<Record<string, boolean>>({});
+  const [previewModelFocus, setPreviewModelFocus] = useState<Record<string, boolean>>({});
+  const [draggedProvider, setDraggedProvider] = useState<LLMProviderName | null>(null);
 
   // Check for OAuth callback results in URL params
   useEffect(() => {
@@ -199,6 +256,101 @@ export default function SettingsPage() {
       .catch((e) => setError(e.message));
   }, []);
 
+  // Auth modes where pi-ai starts a local callback server that may auto-capture the code
+  const LOCAL_SERVER_AUTH_MODES = useRef(new Set(["oauth_openai_codex", "oauth_gemini_cli", "oauth_antigravity"]));
+
+  // Poll for auto-completion when a local-server-based OAuth flow is pending.
+  // pi-ai's local callback server (e.g. port 1455 for OpenAI Codex) may capture
+  // the authorization code before the user pastes anything.
+  useEffect(() => {
+    // Find providers with pending OAuth that use a local callback server
+    const pendingProviders = Object.entries(oauthPending)
+      .filter(([name, pending]) => {
+        if (!pending || !settings) return false;
+        const authModeKey = `${name}AuthMode` as keyof Settings;
+        const authMode = (settings[authModeKey] as AuthMode) || "api_key";
+        return LOCAL_SERVER_AUTH_MODES.current.has(authMode);
+      })
+      .map(([name]) => ({ name: name as LLMProviderName, sessionId: oauthSessionId[name] }))
+      .filter((p) => p.sessionId);
+
+    if (pendingProviders.length === 0) return;
+
+    const interval = setInterval(async () => {
+      for (const { name, sessionId } of pendingProviders) {
+        if (!oauthPending[name]) continue;
+        const authModeKey = `${name}AuthMode` as keyof Settings;
+        const authMode = settings ? (settings[authModeKey] as AuthMode) : "oauth";
+        try {
+          const res = await fetch(
+            `/api/oauth/${name}/poll?sessionId=${sessionId}&authMode=${authMode}`
+          );
+          const data = await res.json();
+          if (data.status === "complete") {
+            setOauthPending((prev) => ({ ...prev, [name]: false }));
+            setOauthCode("");
+            const label = PROVIDERS.find((p) => p.name === name)?.label || name;
+            setOauthMessage(`Successfully connected to ${label}`);
+            setTimeout(() => setOauthMessage(null), 5000);
+            // Refresh settings
+            const settingsRes = await fetch("/api/settings");
+            const settingsData = await settingsRes.json();
+            if (settingsData.oauthStatus) setOauthStatus(settingsData.oauthStatus);
+            setSettings(settingsData);
+            if (settingsData.activeProvider) {
+              window.dispatchEvent(
+                new CustomEvent("provider-switched", {
+                  detail: { provider: settingsData.activeProvider, model: settingsData.activeModel },
+                })
+              );
+            }
+          } else if (data.status === "expired") {
+            // Session expired or lost (e.g. HMR in dev). Check if credentials
+            // were actually stored before the session was cleaned up.
+            try {
+              const statusRes = await fetch("/api/oauth/status");
+              const statusData = await statusRes.json();
+              if (statusData[name]?.connected) {
+                // Credentials were stored — treat as success
+                setOauthPending((prev) => ({ ...prev, [name]: false }));
+                const label = PROVIDERS.find((pp) => pp.name === name)?.label || name;
+                setOauthMessage(`Successfully connected to ${label}`);
+                setTimeout(() => setOauthMessage(null), 5000);
+                const settingsRes = await fetch("/api/settings");
+                const settingsData = await settingsRes.json();
+                if (settingsData.oauthStatus) setOauthStatus(settingsData.oauthStatus);
+                setSettings(settingsData);
+                if (settingsData.activeProvider) {
+                  window.dispatchEvent(
+                    new CustomEvent("provider-switched", {
+                      detail: { provider: settingsData.activeProvider, model: settingsData.activeModel },
+                    })
+                  );
+                }
+              } else {
+                setOauthPending((prev) => ({ ...prev, [name]: false }));
+                setError("OAuth session expired. Please try signing in again.");
+              }
+            } catch {
+              setOauthPending((prev) => ({ ...prev, [name]: false }));
+              setError("OAuth session expired. Please try signing in again.");
+            }
+          } else if (data.status === "error") {
+            setOauthPending((prev) => ({ ...prev, [name]: false }));
+            setOauthProgress((prev) => ({ ...prev, [name]: "" }));
+            setError(data.error || "OAuth login failed. Please try again.");
+          } else if (data.status === "pending" && data.progress) {
+            setOauthProgress((prev) => ({ ...prev, [name]: data.progress }));
+          }
+        } catch {
+          // Polling errors are non-fatal
+        }
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [oauthPending, oauthSessionId, settings]);
+
   // Listen for provider-switched events from TopBar so Settings page stays in sync
   useEffect(() => {
     const handler = (e: Event) => {
@@ -216,31 +368,39 @@ export default function SettingsPage() {
     setOllamaLoading(true);
     fetch("/api/ollama-models")
       .then((r) => r.json())
-      .then((data) => setOllamaModels(data.models || []))
-      .catch(() => setOllamaModels([]))
+      .then((data) => {
+        const models = data.models || [];
+        setOllamaModels(models);
+        setOllamaConnected(models.length > 0);
+      })
+      .catch(() => {
+        setOllamaModels([]);
+        setOllamaConnected(false);
+      })
       .finally(() => setOllamaLoading(false));
   }, []);
 
-  // Fetch models dynamically for the active provider (non-ollama)
+  // Fetch models dynamically for all cloud providers once settings are loaded
+  const modelsFetchedRef = useRef(false);
   useEffect(() => {
-    const provider = settings?.activeProvider;
-    if (!provider || provider === "ollama") return;
-    // Skip if already fetched for this provider
-    if (dynamicModels[provider]) return;
-    setModelsLoading((prev) => ({ ...prev, [provider]: true }));
-    fetch(`/api/models/${provider}`)
-      .then((r) => r.json())
-      .then((data) => {
-        const raw = data.models || [];
-        // API may return objects with { id, ... } or plain strings
-        const models: string[] = raw.map((m: any) => (typeof m === "string" ? m : m.id));
-        if (models.length > 0) {
-          setDynamicModels((prev) => ({ ...prev, [provider]: models }));
-        }
-      })
-      .catch(() => {})
-      .finally(() => setModelsLoading((prev) => ({ ...prev, [provider]: false })));
-  }, [settings?.activeProvider, dynamicModels]);
+    if (!settings || modelsFetchedRef.current) return;
+    modelsFetchedRef.current = true;
+    const cloudProviders: LLMProviderName[] = ["openai", "anthropic", "gemini"];
+    for (const provider of cloudProviders) {
+      setModelsLoading((prev) => ({ ...prev, [provider]: true }));
+      fetch(`/api/models/${provider}`)
+        .then((r) => r.json())
+        .then((data) => {
+          const raw = data.models || [];
+          const models: string[] = raw.map((m: any) => (typeof m === "string" ? m : m.id));
+          if (models.length > 0) {
+            setDynamicModels((prev) => ({ ...prev, [provider]: models }));
+          }
+        })
+        .catch(() => { })
+        .finally(() => setModelsLoading((prev) => ({ ...prev, [provider]: false })));
+    }
+  }, [settings]);
 
   // Persist a partial settings update to the server immediately
   const persistSettings = async (updates: Record<string, any>) => {
@@ -257,6 +417,8 @@ export default function SettingsPage() {
         setOauthStatus(data.oauthStatus);
       }
       setSettings(data);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
       return true;
     } catch (e: any) {
       setError(e.message);
@@ -264,45 +426,6 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSave = async () => {
-    if (!settings) return;
-
-    const updates: any = {
-      activeProvider: settings.activeProvider,
-      activeModel: settings.activeModel,
-      memoryEnabled: settings.memoryEnabled,
-      embeddingProvider: settings.embeddingProvider,
-      embeddingModel: settings.embeddingModel,
-      embeddingProviderOverride: settings.embeddingProviderOverride,
-      previewProvider: settings.previewProvider,
-      previewModel: settings.previewModel,
-      previewProviderOverride: settings.previewProviderOverride,
-      decayLambda: settings.decayLambda,
-      similarityWeight: settings.similarityWeight,
-      temporalWeight: settings.temporalWeight,
-      summarySentences: settings.summarySentences,
-      defaultOpenaiModel: settings.defaultOpenaiModel,
-      defaultAnthropicModel: settings.defaultAnthropicModel,
-      defaultGeminiModel: settings.defaultGeminiModel,
-      defaultOllamaModel: settings.defaultOllamaModel,
-      failoverEnabled: settings.failoverEnabled,
-      failoverChain: settings.failoverChain,
-    };
-
-    // Only send API keys if they were changed (not masked)
-    if (apiKeys.openaiApiKey) updates.openaiApiKey = apiKeys.openaiApiKey;
-    if (apiKeys.anthropicApiKey) updates.anthropicApiKey = apiKeys.anthropicApiKey;
-    if (apiKeys.geminiApiKey) updates.geminiApiKey = apiKeys.geminiApiKey;
-    if (apiKeys.ollamaBaseUrl !== undefined)
-      updates.ollamaBaseUrl = apiKeys.ollamaBaseUrl || settings.ollamaBaseUrl;
-
-    const ok = await persistSettings(updates);
-    if (ok) {
-      setApiKeys({});
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    }
-  };
 
   const handleOAuthDisconnect = async (provider: LLMProviderName) => {
     try {
@@ -330,12 +453,12 @@ export default function SettingsPage() {
     return (settings[key] as AuthMode) || "api_key";
   };
 
-  const moveFailoverProvider = (index: number, direction: "up" | "down") => {
+  const reorderFailoverChain = (fromIndex: number, toIndex: number) => {
     if (!settings) return;
+    if (fromIndex === toIndex) return;
     const chain = [...settings.failoverChain];
-    const newIndex = direction === "up" ? index - 1 : index + 1;
-    if (newIndex < 0 || newIndex >= chain.length) return;
-    [chain[index], chain[newIndex]] = [chain[newIndex], chain[index]];
+    const [moved] = chain.splice(fromIndex, 1);
+    chain.splice(toIndex, 0, moved);
     setSettings({ ...settings, failoverChain: chain });
     persistSettings({ failoverChain: chain });
   };
@@ -437,10 +560,14 @@ export default function SettingsPage() {
                     <ProviderIcon provider={p.name} active={settings.activeProvider === p.name} />
                     <span>{p.label}</span>
                   </div>
-                  {oauthStatus[p.name]?.connected && (
-                    <SubscriptionBadge
+                  {p.name === "ollama" ? (
+                    <OllamaStatusBadge connected={ollamaConnected} />
+                  ) : (
+                    <ConnectionBadge
+                      hasApiKey={!!(settings as any)[p.keyField]}
+                      hasOAuth={!!oauthStatus[p.name]?.connected}
                       tier={oauthStatus[p.name]?.tier || null}
-                      provider={p.name}
+                      authMode={getAuthMode(p.name)}
                     />
                   )}
                 </div>
@@ -480,6 +607,9 @@ export default function SettingsPage() {
 
           {/* Default Models per Provider */}
           <h2 className="mb-3 mt-6 text-sm font-medium">Default Taskbar Model</h2>
+          <p className="mb-2 text-xs text-muted-foreground">
+            Default model shown for each provider in the taskbar menu
+          </p>
           <div className="space-y-2">
             {(["openai", "anthropic", "gemini", "ollama"] as LLMProviderName[]).map((provider) => {
               const settingsKey = `default${provider.charAt(0).toUpperCase() + provider.slice(1)}Model` as keyof Settings;
@@ -524,6 +654,62 @@ export default function SettingsPage() {
               );
             })}
           </div>
+
+          {/* Preview Model per Provider */}
+          <div className="mt-6">
+            <h2 className="mb-3 text-sm font-medium">Preview Model</h2>
+            <p className="mb-2 text-xs text-muted-foreground">
+              Model used for chat previews and summaries
+            </p>
+            <div className="space-y-2">
+              {(["openai", "anthropic", "gemini", "ollama"] as LLMProviderName[]).map((provider) => {
+                const settingsKey = `preview${provider.charAt(0).toUpperCase() + provider.slice(1)}Model` as keyof Settings;
+                const currentValue = (settings as any)[settingsKey] as string;
+                const options = provider === "ollama"
+                  ? (ollamaModels.length > 0 ? ollamaModels : [currentValue || "llama3.2"])
+                  : (dynamicModels[provider] || FALLBACK_MODEL_OPTIONS[provider]);
+                const isActivePreview = provider === settings.previewProvider;
+                return (
+                  <div key={provider} className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="shrink-0"
+                      title={`${isActivePreview ? "Active" : "Click to set as"} preview provider`}
+                      onClick={() => {
+                        setSettings({ ...settings, previewProvider: provider, previewModel: currentValue });
+                        persistSettings({ previewProvider: provider, previewModel: currentValue });
+                      }}
+                    >
+                      <ProviderIcon provider={provider} active={!!previewModelFocus[provider]} />
+                    </button>
+                    <select
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={currentValue}
+                      onFocus={() => setPreviewModelFocus((prev) => ({ ...prev, [provider]: true }))}
+                      onBlur={() => setPreviewModelFocus((prev) => ({ ...prev, [provider]: false }))}
+                      onChange={(e) => {
+                        const newModel = e.target.value;
+                        const updates: Record<string, any> = { [settingsKey]: newModel };
+                        if (isActivePreview) {
+                          updates.previewModel = newModel;
+                          setSettings({ ...settings, [settingsKey]: newModel, previewModel: newModel });
+                        } else {
+                          setSettings({ ...settings, [settingsKey]: newModel });
+                        }
+                        persistSettings(updates);
+                      }}
+                    >
+                      {options.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </section>
 
         <Separator className="my-6" />
@@ -557,64 +743,93 @@ export default function SettingsPage() {
               />
             </div>
 
-            {settings.failoverEnabled && (
-              <div className="rounded-md border border-border p-3">
-                <div className="mb-2 text-xs text-muted-foreground">
-                  Failover priority (primary provider is always tried first):
-                </div>
-                <div className="space-y-1">
-                  {PROVIDERS.filter((p) => p.name !== settings.activeProvider).map((p) => {
-                    const isInChain = settings.failoverChain.includes(p.name);
-                    const chainIndex = settings.failoverChain.indexOf(p.name);
-                    return (
-                      <div
-                        key={p.name}
-                        className={`flex items-center justify-between rounded px-2 py-1.5 text-sm ${isInChain ? "bg-accent" : ""
+            {settings.failoverEnabled && (() => {
+              // Effective chain: only providers that are not the active provider
+              const effectiveChain = settings.failoverChain.filter(
+                (name) => name !== settings.activeProvider
+              );
+              const nonActive = PROVIDERS.filter((p) => p.name !== settings.activeProvider);
+              const inChain = effectiveChain
+                .map((name) => nonActive.find((p) => p.name === name))
+                .filter(Boolean) as typeof nonActive;
+              const notInChain = nonActive.filter((p) => !effectiveChain.includes(p.name));
+              const ordered = [...inChain, ...notInChain];
+
+              return (
+                <div className="rounded-md border border-border p-3">
+                  <div className="mb-2 text-xs text-muted-foreground">
+                    Failover priority (primary provider is always tried first):
+                  </div>
+                  <div className="space-y-1">
+                    {ordered.map((p) => {
+                      const isInChain = effectiveChain.includes(p.name);
+                      // Position among checked items only (top item = #1)
+                      const displayNumber = isInChain
+                        ? inChain.findIndex((c) => c.name === p.name) + 1
+                        : -1;
+                      return (
+                        <div
+                          key={p.name}
+                          draggable={isInChain}
+                          onDragStart={(e) => {
+                            setDraggedProvider(p.name);
+                            e.dataTransfer.effectAllowed = "move";
+                          }}
+                          onDragEnd={() => setDraggedProvider(null)}
+                          onDragOver={(e) => {
+                            if (!isInChain) return;
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = "move";
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            if (!draggedProvider || !isInChain) return;
+                            const fromIndex = effectiveChain.indexOf(draggedProvider);
+                            const toIndex = effectiveChain.indexOf(p.name);
+                            reorderFailoverChain(fromIndex, toIndex);
+                            setDraggedProvider(null);
+                          }}
+                          className={`flex items-center justify-between rounded px-2 py-1.5 text-sm transition-colors ${
+                            isInChain ? "bg-accent" : ""
+                          } ${isInChain ? "cursor-grab active:cursor-grabbing" : ""} ${
+                            draggedProvider && isInChain && draggedProvider !== p.name ? "border border-dashed border-primary/40" : ""
                           }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={isInChain}
-                            onChange={() => toggleFailoverProvider(p.name)}
-                            className="rounded"
-                          />
-                          <ProviderIcon provider={p.name} active={isInChain} />
-                          <span>{p.label}</span>
-                          {oauthStatus[p.name]?.connected && (
-                            <SubscriptionBadge
-                              tier={oauthStatus[p.name]?.tier || null}
-                              provider={p.name}
+                        >
+                          <div className="flex items-center gap-2">
+                            {isInChain && (
+                              <GripVertical className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            )}
+                            <input
+                              type="checkbox"
+                              checked={isInChain}
+                              onChange={() => toggleFailoverProvider(p.name)}
+                              className="rounded"
                             />
+                            <ProviderIcon provider={p.name} active={isInChain} />
+                            <span>{p.label}</span>
+                            {p.name === "ollama" ? (
+                              <OllamaStatusBadge connected={ollamaConnected} />
+                            ) : (
+                              <ConnectionBadge
+                                hasApiKey={!!(settings as any)[p.keyField]}
+                                hasOAuth={!!oauthStatus[p.name]?.connected}
+                                tier={oauthStatus[p.name]?.tier || null}
+                                authMode={getAuthMode(p.name)}
+                              />
+                            )}
+                          </div>
+                          {isInChain && (
+                            <span className="text-xs text-muted-foreground">
+                              #{displayNumber}
+                            </span>
                           )}
                         </div>
-                        {isInChain && (
-                          <div className="flex items-center gap-1">
-                            <span className="text-xs text-muted-foreground mr-1">
-                              #{chainIndex + 1}
-                            </span>
-                            <button
-                              className="p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-                              disabled={chainIndex === 0}
-                              onClick={() => moveFailoverProvider(chainIndex, "up")}
-                            >
-                              <GripVertical className="h-3 w-3 rotate-180" />
-                            </button>
-                            <button
-                              className="p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
-                              disabled={chainIndex === settings.failoverChain.length - 1}
-                              onClick={() => moveFailoverProvider(chainIndex, "down")}
-                            >
-                              <GripVertical className="h-3 w-3" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </section>
 
@@ -625,9 +840,19 @@ export default function SettingsPage() {
           <h2 className="mb-3 text-sm font-medium">Auto-Summary</h2>
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">
-              Summary Length:{" "}
+              Summary Depth:{" "}
               <span className="font-medium text-foreground">
-                {settings.summarySentences} sentence{settings.summarySentences === 1 ? "" : "s"}
+                {settings.summarySentences <= 1
+                  ? "One-liner"
+                  : settings.summarySentences <= 2
+                    ? "Brief (1-2 sentences)"
+                    : settings.summarySentences <= 3
+                      ? "Short paragraph (up to 3 sentences)"
+                      : settings.summarySentences <= 5
+                        ? "Thorough paragraph (3-5 sentences)"
+                        : settings.summarySentences <= 7
+                          ? "In-depth (1-2 paragraphs)"
+                          : "Comprehensive analysis (2-3 paragraphs)"}
               </span>
             </label>
             <input
@@ -672,40 +897,40 @@ export default function SettingsPage() {
               const authModeOptions: { mode: AuthMode; label: string }[] =
                 p.name === "gemini"
                   ? [
-                      { mode: "api_key", label: "API Key" },
-                      { mode: "oauth_gemini_cli", label: "Gemini CLI" },
-                      { mode: "oauth_antigravity", label: "Antigravity" },
-                    ]
+                    { mode: "api_key", label: "API Key" },
+                    { mode: "oauth_gemini_cli", label: "Gemini CLI" },
+                    { mode: "oauth_antigravity", label: "Antigravity" },
+                  ]
                   : p.name === "anthropic"
                     ? [
-                        { mode: "api_key", label: "API Key" },
-                        { mode: "oauth", label: "OAuth" },
-                      ]
+                      { mode: "api_key", label: "API Key" },
+                      { mode: "oauth", label: "OAuth" },
+                    ]
                     : p.name === "openai"
                       ? [
-                          { mode: "api_key", label: "API Key" },
-                          { mode: "oauth_openai_codex", label: "Codex OAuth" },
-                        ]
+                        { mode: "api_key", label: "API Key" },
+                        { mode: "oauth_openai_codex", label: "Codex OAuth" },
+                      ]
                       : [{ mode: "api_key", label: "API Key" }];
 
               // Determine the sign-in label based on provider
               const signInLabel =
                 p.name === "gemini" ? "Sign in with Google" :
-                p.name === "anthropic" ? "Sign in with Anthropic" :
-                p.name === "openai" ? "Sign in with OpenAI" :
-                `Sign in with ${p.label}`;
+                  p.name === "anthropic" ? "Sign in with Anthropic" :
+                    p.name === "openai" ? "Sign in with OpenAI" :
+                      `Sign in with ${p.label}`;
 
               return (
                 <div key={p.name} className="rounded-md border border-border p-3">
                   <div className="mb-2 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">{p.label}</span>
-                      {providerOAuth?.connected && (
-                        <SubscriptionBadge
-                          tier={providerOAuth.tier}
-                          provider={p.name}
-                        />
-                      )}
+                      <ConnectionBadge
+                        hasApiKey={!!(settings as any)[p.keyField]}
+                        hasOAuth={!!providerOAuth?.connected}
+                        tier={providerOAuth?.tier || null}
+                        authMode={authMode}
+                      />
                     </div>
                     {/* Auth mode toggle */}
                     {authModeOptions.length > 1 && (
@@ -774,24 +999,26 @@ export default function SettingsPage() {
                             const ok = await persistSettings({ [p.keyField]: apiKeys[p.keyField] });
                             if (ok) {
                               setApiKeys((prev) => ({ ...prev, [p.keyField]: "" }));
-                              setSaved(true);
-                              setTimeout(() => setSaved(false), 2000);
                             }
                           }}
                         >
                           Save
                         </Button>
                       </div>
-                      {p.name === "anthropic" && !(settings as any)[p.keyField] && !apiKeys[p.keyField] && (
+                      {!(settings as any)[p.keyField] && !apiKeys[p.keyField] && ({
+                        openai: { url: "https://platform.openai.com/api-keys", label: "platform.openai.com" },
+                        anthropic: { url: "https://console.anthropic.com/settings/keys", label: "console.anthropic.com" },
+                        gemini: { url: "https://aistudio.google.com/apikey", label: "aistudio.google.com" },
+                      } as Record<string, { url: string; label: string }>)[p.name] && (
                         <div className="mt-1.5 text-xs text-muted-foreground">
                           Get your API key at{" "}
                           <a
-                            href="https://console.anthropic.com/settings/keys"
+                            href={({ openai: "https://platform.openai.com/api-keys", anthropic: "https://console.anthropic.com/settings/keys", gemini: "https://aistudio.google.com/apikey" } as Record<string, string>)[p.name]}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="underline hover:text-foreground"
                           >
-                            console.anthropic.com
+                            {({ openai: "platform.openai.com", anthropic: "console.anthropic.com", gemini: "aistudio.google.com" } as Record<string, string>)[p.name]}
                           </a>
                         </div>
                       )}
@@ -856,7 +1083,29 @@ export default function SettingsPage() {
                             {signInLabel}
                           </Button>
                         </>
+                      ) : LOCAL_SERVER_AUTH_MODES.current.has(authMode) ? (
+                        /* Local-server flow: auto-detect via polling, no code input needed */
+                        <>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <span>
+                              {oauthProgress[p.name] ||
+                                oauthInstructions[p.name] ||
+                                "Complete the sign-in in your browser — connection will be detected automatically."}
+                            </span>
+                          </div>
+                          <button
+                            className="text-xs text-muted-foreground hover:text-foreground underline"
+                            onClick={() => {
+                              setOauthPending((prev) => ({ ...prev, [p.name]: false }));
+                              setOauthCode("");
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </>
                       ) : (
+                        /* Non-local-server flow: user must paste a code */
                         <>
                           <div className="text-xs text-muted-foreground">
                             {oauthInstructions[p.name] || (
@@ -1014,12 +1263,19 @@ export default function SettingsPage() {
 
             {/* Ollama (no auth needed) */}
             <div className="rounded-md border border-border p-3">
-              <div className="mb-2 text-sm font-medium">Ollama (Local)</div>
+              <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                <span>Ollama (Local)</span>
+                <OllamaStatusBadge connected={ollamaConnected} />
+              </div>
               <Input
                 value={apiKeys.ollamaBaseUrl ?? settings.ollamaBaseUrl}
                 onChange={(e) =>
                   setApiKeys({ ...apiKeys, ollamaBaseUrl: e.target.value })
                 }
+                onBlur={() => {
+                  const url = apiKeys.ollamaBaseUrl ?? settings.ollamaBaseUrl;
+                  if (url) persistSettings({ ollamaBaseUrl: url });
+                }}
                 placeholder="http://localhost:11434"
               />
             </div>
@@ -1041,9 +1297,10 @@ export default function SettingsPage() {
               </div>
               <Switch
                 checked={settings.memoryEnabled}
-                onCheckedChange={(checked: boolean) =>
-                  setSettings({ ...settings, memoryEnabled: checked })
-                }
+                onCheckedChange={(checked: boolean) => {
+                  setSettings({ ...settings, memoryEnabled: checked });
+                  persistSettings({ memoryEnabled: checked });
+                }}
               />
             </div>
 
@@ -1071,13 +1328,13 @@ export default function SettingsPage() {
                         <button className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm">
                           <span className="flex items-center gap-2">
                             <ProviderIcon provider={settings.embeddingProvider} active />
-                            {({openai:"OpenAI",anthropic:"Anthropic (Voyage AI)",gemini:"Gemini",ollama:"Ollama"} as Record<string,string>)[settings.embeddingProvider]}
+                            {({ openai: "OpenAI", anthropic: "Anthropic (Voyage AI)", gemini: "Gemini", ollama: "Ollama" } as Record<string, string>)[settings.embeddingProvider]}
                           </span>
                           <ChevronDown className="h-4 w-4 text-muted-foreground" />
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)]">
-                        {([["openai","OpenAI"],["anthropic","Anthropic (Voyage AI)"],["gemini","Gemini"],["ollama","Ollama"]] as [LLMProviderName,string][]).map(([value,label]) => (
+                        {([["openai", "OpenAI"], ["anthropic", "Anthropic (Voyage AI)"], ["gemini", "Gemini"], ["ollama", "Ollama"]] as [LLMProviderName, string][]).map(([value, label]) => (
                           <DropdownMenuItem
                             key={value}
                             onSelect={() => {
@@ -1094,57 +1351,11 @@ export default function SettingsPage() {
                     </DropdownMenu>
                   ) : (
                     <div className="rounded-md border border-input bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
-                      Follows active provider ({PROVIDERS.find((p) => p.name === settings.activeProvider)?.label})
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <div className="mb-1 flex items-center justify-between">
-                    <label className="block text-xs text-muted-foreground">
-                      Preview Model Provider
-                    </label>
-                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <span>Override</span>
-                      <Switch
-                        checked={settings.previewProviderOverride}
-                        onCheckedChange={(checked: boolean) => {
-                          setSettings({ ...settings, previewProviderOverride: checked });
-                          persistSettings({ previewProviderOverride: checked });
-                        }}
-                      />
-                    </label>
-                  </div>
-                  {settings.previewProviderOverride ? (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm">
-                          <span className="flex items-center gap-2">
-                            <ProviderIcon provider={settings.previewProvider} active />
-                            {PROVIDERS.find((p) => p.name === settings.previewProvider)?.label}
-                          </span>
-                          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)]">
-                        {PROVIDERS.map((p) => (
-                          <DropdownMenuItem
-                            key={p.name}
-                            onSelect={() => {
-                              setSettings({ ...settings, previewProvider: p.name });
-                              persistSettings({ previewProvider: p.name });
-                            }}
-                            className="flex items-center gap-2"
-                          >
-                            <ProviderIcon provider={p.name} active={p.name === settings.previewProvider} />
-                            {p.label}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  ) : (
-                    <div className="rounded-md border border-input bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
-                      Follows active provider ({PROVIDERS.find((p) => p.name === settings.activeProvider)?.label})
+                      <span className="flex items-center gap-2">
+                        Follows active provider (
+                        <ProviderIcon provider={settings.activeProvider} active />
+                        {({ openai: "OpenAI", anthropic: "Anthropic (Voyage AI)", gemini: "Gemini", ollama: "Ollama" } as Record<string, string>)[settings.activeProvider]})
+                      </span>
                     </div>
                   )}
                 </div>
@@ -1164,6 +1375,7 @@ export default function SettingsPage() {
                           decayLambda: parseFloat(e.target.value) || 0,
                         })
                       }
+                      onBlur={() => persistSettings({ decayLambda: settings.decayLambda })}
                     />
                   </div>
                   <div>
@@ -1182,6 +1394,7 @@ export default function SettingsPage() {
                           similarityWeight: parseFloat(e.target.value) || 0,
                         })
                       }
+                      onBlur={() => persistSettings({ similarityWeight: settings.similarityWeight })}
                     />
                   </div>
                   <div>
@@ -1200,6 +1413,7 @@ export default function SettingsPage() {
                           temporalWeight: parseFloat(e.target.value) || 0,
                         })
                       }
+                      onBlur={() => persistSettings({ temporalWeight: settings.temporalWeight })}
                     />
                   </div>
                 </div>
@@ -1274,17 +1488,17 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        <div className="flex items-center gap-3 pb-6">
-          <Button onClick={handleSave}>
-            {saved ? (
-              <>
-                <Check className="mr-2 h-4 w-4" /> Saved
-              </>
-            ) : (
-              "Save Settings"
-            )}
-          </Button>
-        </div>
+        <div className="pb-6" />
+      </div>
+
+      {/* Floating save toast */}
+      <div
+        className={`fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-md border bg-popover px-3 py-2 text-sm shadow-lg transition-all duration-300 ${
+          saved ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0 pointer-events-none"
+        }`}
+      >
+        <Check className="h-4 w-4 text-green-500" />
+        Settings saved
       </div>
     </div>
   );

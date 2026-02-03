@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMessage, getChildren, updatePreviewSummary } from "@/db/queries/messages";
 import { getSettings } from "@/db/queries/settings";
-import { getProvider } from "@/lib/llm/provider-registry";
+import { getProviderAsync } from "@/lib/llm/provider-registry";
 import { PREVIEW_PROMPT } from "@/lib/constants";
 
 export async function POST(
@@ -27,7 +27,7 @@ export async function POST(
   const firstResponse = children.find((c) => c.role === "assistant");
 
   const settings = getSettings();
-  const provider = getProvider(settings.previewProvider, settings);
+  const provider = await getProviderAsync(settings.previewProvider, settings);
 
   try {
     const response = await provider.complete({

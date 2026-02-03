@@ -34,7 +34,7 @@ export async function GET(
     // Start the login session — this calls pi-ai's provider.login()
     // which generates PKCE, builds the auth URL, and (for some providers)
     // starts a local callback server as a fallback.
-    const { sessionId } = startLoginSession(piProviderId);
+    const { sessionId } = await startLoginSession(piProviderId);
 
     // Wait for pi-ai to emit the auth URL via the onAuth callback
     const { authUrl, instructions } = await waitForAuthUrl(sessionId);

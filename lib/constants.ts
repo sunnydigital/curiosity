@@ -31,7 +31,23 @@ export const SELECTION_SUMMARY_PROMPT =
   "You will receive a text excerpt selected by the user. If it is a single word or short phrase, give a concise definition or explanation. If it is a longer passage, summarize it in 1 brief sentence. Reply with ONLY the definition or summary — no greetings, no preamble, no offers to help.";
 
 export function getSelectionSummaryPrompt(sentences: number): string {
-  return `You will receive a text excerpt selected by the user. If it is a single word or short phrase, give a concise definition or explanation. If it is a longer passage, summarize it in ${sentences} sentence${sentences === 1 ? "" : "s"} or fewer. Reply with ONLY the definition or summary — no greetings, no preamble, no offers to help.`;
+  if (sentences <= 1) {
+    return "You will receive a text excerpt selected by the user. If it is a single word or short phrase, give a one-line definition. If it is a longer passage, distill it into 1 brief sentence capturing the core idea. Reply with ONLY the definition or summary — no greetings, no preamble, no offers to help.";
+  }
+  if (sentences <= 2) {
+    return "You will receive a text excerpt selected by the user. If it is a single word or short phrase, give a concise definition or explanation in 1-2 sentences. If it is a longer passage, summarize it in 2 sentences or fewer — state the main point, then one supporting detail. Reply with ONLY the definition or summary — no greetings, no preamble, no offers to help.";
+  }
+  if (sentences <= 3) {
+    return "You will receive a text excerpt selected by the user. Provide a short summary in 1 paragraph of up to 3 sentences. Cover the main idea and key supporting points. Reply with ONLY the summary — no greetings, no preamble, no offers to help.";
+  }
+  if (sentences <= 5) {
+    return "You will receive a text excerpt selected by the user. Provide a thorough summary in 1 paragraph of 3-5 sentences. Cover the main idea, key details, and any important nuances or implications. Reply with ONLY the summary — no greetings, no preamble, no offers to help.";
+  }
+  if (sentences <= 7) {
+    return "You will receive a text excerpt selected by the user. Go more in-depth: provide a detailed summary in 1-2 paragraphs (5-7 sentences total). Explain the main idea, delve into important details, and note any significant context or implications. Reply with ONLY the summary — no greetings, no preamble, no offers to help.";
+  }
+  // 8-10
+  return "You will receive a text excerpt selected by the user. Provide a comprehensive, in-depth analysis in 2-3 paragraphs (8-10 sentences total). Thoroughly explain the main ideas, delve into all important details, discuss context and implications, and highlight any notable connections or nuances. Reply with ONLY the analysis — no greetings, no preamble, no offers to help.";
 }
 
 export const DEFAULT_DECAY_LAMBDA = 0.0000001;

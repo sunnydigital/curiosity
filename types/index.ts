@@ -176,6 +176,11 @@ export interface Settings {
   defaultAnthropicModel: string;
   defaultGeminiModel: string;
   defaultOllamaModel: string;
+  // Preview models per provider (used for chat previews and summaries)
+  previewOpenaiModel: string;
+  previewAnthropicModel: string;
+  previewGeminiModel: string;
+  previewOllamaModel: string;
   // Failover
   failoverEnabled: boolean;
   failoverChain: LLMProviderName[];

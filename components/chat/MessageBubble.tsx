@@ -65,7 +65,7 @@ export function MessageBubble({
   onEditResend,
 }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
-  const rawContent = isStreaming ? streamingContent || "" : message.content;
+  const rawContent = isStreaming ? streamingContent || "" : (streamingContent || message.content);
   const content = preprocessLatex(rawContent);
   const isUser = message.role === "user";
 

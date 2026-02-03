@@ -4,6 +4,19 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GitBranch, X, Loader2, Plus } from "lucide-react";
+import Markdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+
+// Preprocess content to fix common LaTeX escaping issues from LLMs
+function preprocessLatex(text: string): string {
+  let processed = text;
+  processed = processed.replace(/\\\[/g, () => '$$');
+  processed = processed.replace(/\\\]/g, () => '$$');
+  processed = processed.replace(/\\\(/g, '$');
+  processed = processed.replace(/\\\)/g, '$');
+  return processed;
+}
 
 /** Rotating palette for the shortcut kbd badges */
 const KBD_COLORS = [
@@ -82,8 +95,8 @@ export function TextSelectionToolbar({
   const [newLabel, setNewLabel] = useState("");
   const [newPrompt, setNewPrompt] = useState("");
   const [summary, setSummary] = useState<string | null>(null);
+  const [summaryError, setSummaryError] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
-
   // Persist whenever shortcuts change
   useEffect(() => {
     saveShortcuts(shortcuts);
@@ -106,6 +119,7 @@ export function TextSelectionToolbar({
 
     let cancelled = false;
     setSummary(null);
+    setSummaryError(false);
     setSummaryLoading(false);
 
     const timer = setTimeout(() => {
@@ -121,15 +135,21 @@ export function TextSelectionToolbar({
           });
           if (cancelled) return;
           if (!res.ok) {
+            setSummaryError(true);
             setSummaryLoading(false);
             return;
           }
           const data = await res.json();
-          if (!cancelled && data?.summary) {
-            setSummary(data.summary);
+          if (!cancelled) {
+            if (data?.summary) {
+              setSummary(data.summary);
+            } else {
+              // 200 OK but empty/missing summary (e.g. provider returned empty content)
+              setSummaryError(true);
+            }
           }
         } catch {
-          // fetch failed or component unmounted
+          if (!cancelled) setSummaryError(true);
         }
         if (!cancelled) setSummaryLoading(false);
       })();
@@ -316,15 +336,25 @@ export function TextSelectionToolbar({
       )}
 
       {/* Quick summary from lightweight model */}
-      {(summaryLoading || summary) && (
+      {(summaryLoading || summary || summaryError) && (
         <div className="border-t border-border px-2 py-1.5 text-xs text-muted-foreground">
           {summaryLoading ? (
             <span className="flex items-center gap-1.5">
               <Loader2 className="h-3 w-3 animate-spin" />
               Summarizing...
             </span>
+          ) : summaryError ? (
+            <span className="text-destructive">Failed to generate summary</span>
           ) : (
-            summary
+            <Markdown
+              remarkPlugins={[remarkMath]}
+              rehypePlugins={[rehypeKatex]}
+              components={{
+                p: ({ children }) => <p className="mb-1.5 last:mb-0">{children}</p>,
+              }}
+            >
+              {preprocessLatex(summary || "")}
+            </Markdown>
           )}
         </div>
       )}

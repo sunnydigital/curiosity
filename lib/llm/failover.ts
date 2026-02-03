@@ -9,6 +9,7 @@ import type {
 } from "@/types";
 import { getProviderAsync } from "./provider-registry";
 import { resolveEquivalentModel } from "./model-equivalents";
+import { getOAuthTokens } from "@/db/queries/oauth-tokens";
 
 export interface FailoverOptions {
   settings: Settings;
@@ -116,23 +117,28 @@ export class FailoverExecutor {
       addIfNew(p);
     }
 
-    // Auto-include any provider with a configured credential (API key or OAuth)
+    // Auto-include any provider with a configured credential (API key or OAuth tokens)
+    // Check both API keys and OAuth tokens in the database to avoid failover errors
     const allProviders: LLMProviderName[] = ["openai", "anthropic", "gemini", "ollama"];
     for (const p of allProviders) {
       if (seen.has(p)) continue;
-      const authModeKey = `${p}AuthMode` as keyof Settings;
-      const authMode = this.settings[authModeKey] as string;
-      const isOAuth = authMode === "oauth" || authMode === "oauth_gemini_cli" || authMode === "oauth_antigravity";
+
+      // Check if the provider has credentials available
+      const hasApiKey =
+        (p === "openai" && this.settings.openaiApiKey) ||
+        (p === "anthropic" && this.settings.anthropicApiKey) ||
+        (p === "gemini" && this.settings.geminiApiKey);
+
+      // Check if the provider has OAuth tokens in the database
+      const hasOAuthTokens = getOAuthTokens(p) !== null;
+
       if (p === "ollama" && this.settings.ollamaBaseUrl) {
         addIfNew(p);
-      } else if (p === "openai" && (this.settings.openaiApiKey || isOAuth)) {
-        addIfNew(p);
-      } else if (p === "anthropic" && (this.settings.anthropicApiKey || isOAuth)) {
-        addIfNew(p);
-      } else if (p === "gemini" && (this.settings.geminiApiKey || isOAuth)) {
+      } else if (hasApiKey || hasOAuthTokens) {
         addIfNew(p);
       }
     }
+
   }
 
   get actualProvider(): LLMProviderName {
