@@ -144,6 +144,34 @@ export function ChatView({ chatId }: ChatViewProps) {
     return trunkIds;
   }, [activePath, trunkIds]);
 
+  // Include a synthetic streaming message in the tree so it updates in real-time
+  const treeMessages = useMemo(() => {
+    if (!isLoading || !streamingContent) return messages;
+    const lastDisplayed = displayMessages[displayMessages.length - 1];
+    if (!lastDisplayed) return messages;
+    // Only add if there isn't already a real message being streamed
+    if (messages.some((m) => m.id === "streaming")) return messages;
+    const streamingMsg: Message = {
+      id: "streaming",
+      chatId,
+      role: "assistant",
+      content: streamingContent.slice(0, 80),
+      parentId: lastDisplayed.id,
+      isBranchRoot: false,
+      branchPrompt: null,
+      branchContext: null,
+      branchSourceMessageId: null,
+      branchCharStart: null,
+      branchCharEnd: null,
+      previewSummary: streamingContent.slice(0, 80),
+      siblingIndex: 0,
+      provider: null,
+      model: null,
+      createdAt: new Date().toISOString(),
+    };
+    return [...messages, streamingMsg];
+  }, [messages, isLoading, streamingContent, displayMessages, chatId]);
+
   const getBranches = useCallback(
     (messageId: string): Message[] => {
       return messages.filter(
@@ -332,6 +360,17 @@ export function ChatView({ chatId }: ChatViewProps) {
     [removeMessage]
   );
 
+  // Listen for provider switches from the TopBar
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { provider, model } = (e as CustomEvent).detail;
+      setActiveProvider(provider);
+      setActiveModel(model);
+    };
+    window.addEventListener("provider-switched", handler);
+    return () => window.removeEventListener("provider-switched", handler);
+  }, []);
+
   const isOnBranch = activePath.length > 0;
 
   return (
@@ -358,7 +397,7 @@ export function ChatView({ chatId }: ChatViewProps) {
             {displayMessages.length === 0 && !isLoading && (
               <div className="flex h-full items-center justify-center pt-20">
                 <div className="text-center">
-                  <h2 className="mb-2 text-2xl font-semibold">CuriosityLM</h2>
+                  <h2 className="mb-2 text-2xl font-semibold">Curiosity</h2>
                   <p className="text-muted-foreground">
                     Start a conversation and explore topics with tree-based
                     branching.
@@ -467,7 +506,7 @@ export function ChatView({ chatId }: ChatViewProps) {
       </div>
 
       <TreePanel
-        messages={messages}
+        messages={treeMessages}
         activeIds={activeIds}
         isOpen={showTree}
         onClose={() => setShowTree(false)}

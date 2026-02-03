@@ -9,7 +9,7 @@ import { TopBar } from "@/components/layout/TopBar";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "CuriosityLM",
+  title: "Curiosity",
   description: "A notebook for the curious - tree-based AI chat",
 };
 

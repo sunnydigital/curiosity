@@ -70,11 +70,11 @@ export class OpenAIProvider extends BaseLLMProvider {
 
     for await (const chunk of response) {
       const content = chunk.choices[0]?.delta?.content || "";
-      const done = chunk.choices[0]?.finish_reason !== null;
+      const finishReason = chunk.choices[0]?.finish_reason;
       if (content) {
         yield { content, done: false };
       }
-      if (done) {
+      if (finishReason !== null && finishReason !== undefined) {
         yield { content: "", done: true };
       }
     }
@@ -92,11 +92,4 @@ export class OpenAIProvider extends BaseLLMProvider {
     };
   }
 
-  async listModels(): Promise<string[]> {
-    const response = await this.client.models.list();
-    return response.data
-      .filter((m) => m.id.includes("gpt") || m.id.includes("o1") || m.id.includes("o3"))
-      .map((m) => m.id)
-      .sort();
-  }
 }

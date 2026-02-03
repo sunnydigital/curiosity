@@ -1,6 +1,21 @@
 export type LLMProviderName = "openai" | "anthropic" | "gemini" | "ollama";
 
-export type AuthMode = "api_key" | "oauth";
+export type AuthMode =
+  | "api_key"
+  | "oauth"                // Anthropic OAuth / generic
+  | "oauth_gemini_cli"     // Google Gemini CLI credentials
+  | "oauth_antigravity"    // Google Cloud Code Assist (Antigravity)
+  | "oauth_openai_codex"   // OpenAI Codex (ChatGPT Plus/Pro)
+  | "oauth_github_copilot"; // GitHub Copilot
+
+/** Credential format used by @mariozechner/pi-ai OAuth providers. */
+export interface PiOAuthCredentials {
+  access: string;
+  refresh: string;
+  expires: number; // epoch ms
+  /** Extra fields some providers add (e.g. accountId, projectId) */
+  [key: string]: any;
+}
 
 export type SubscriptionTier =
   | "free"
@@ -40,6 +55,15 @@ export interface Chat {
   id: string;
   title: string;
   starred: boolean;
+  projectId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Project {
+  id: string;
+  title: string;
+  icon: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -128,11 +152,13 @@ export interface Settings {
   memoryEnabled: boolean;
   embeddingProvider: LLMProviderName;
   embeddingModel: string;
+  embeddingProviderOverride: boolean;
   decayLambda: number;
   similarityWeight: number;
   temporalWeight: number;
   previewProvider: LLMProviderName;
   previewModel: string;
+  previewProviderOverride: boolean;
   summarySentences: number;
   // Auth mode per provider
   openaiAuthMode: AuthMode;
@@ -145,6 +171,11 @@ export interface Settings {
   anthropicOauthClientSecret: string | null;
   geminiOauthClientId: string | null;
   geminiOauthClientSecret: string | null;
+  // Default models per provider (used by TopBar provider switcher)
+  defaultOpenaiModel: string;
+  defaultAnthropicModel: string;
+  defaultGeminiModel: string;
+  defaultOllamaModel: string;
   // Failover
   failoverEnabled: boolean;
   failoverChain: LLMProviderName[];

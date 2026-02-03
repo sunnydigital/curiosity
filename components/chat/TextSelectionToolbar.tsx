@@ -31,7 +31,7 @@ export const DEFAULT_SHORTCUTS: Shortcut[] = [
   { id: "specifics", label: "Specifics", prompt: "What are the specifics of: ", builtinType: "specifics" },
 ];
 
-const STORAGE_KEY = "curiositylm-shortcuts";
+const STORAGE_KEY = "curiosity-shortcuts";
 
 export function loadShortcuts(): Shortcut[] {
   if (typeof window === "undefined") return DEFAULT_SHORTCUTS;

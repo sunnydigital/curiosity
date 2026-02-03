@@ -195,18 +195,17 @@ export async function POST(request: NextRequest) {
         // Extract a readable error message from various error formats
         let errorMessage = "An unexpected error occurred";
 
-        if (error.message) {
+        // Handle SDK errors (Anthropic, OpenAI) with status + nested error body
+        if (error.status && error.error?.message) {
+          errorMessage = `${error.error.message} (${error.status})`;
+        } else if (error.status && error.message) {
+          errorMessage = `${error.message}`;
+        } else if (error.error?.message) {
+          errorMessage = error.error.message;
+        } else if (error.message) {
           errorMessage = error.message;
-        }
-
-        // Handle Anthropic API errors (nested error.error.message)
-        if (error.error?.message) {
-          errorMessage = error.error.message;
-        }
-
-        // Handle serialized error objects from JSON
-        if (typeof error === "object" && error.type === "error" && error.error?.message) {
-          errorMessage = error.error.message;
+        } else if (typeof error === "string") {
+          errorMessage = error;
         }
 
         controller.enqueue(

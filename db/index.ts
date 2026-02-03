@@ -7,7 +7,7 @@ let db: Database.Database | null = null;
 export function getDb(): Database.Database {
   if (db) return db;
 
-  const dbPath = path.join(process.cwd(), "curiositylm.db");
+  const dbPath = path.join(process.cwd(), "curiosity.db");
   db = new Database(dbPath);
 
   db.pragma("journal_mode = WAL");

@@ -1,6 +1,6 @@
 import { getDb } from "@/db";
 import { encrypt, decrypt } from "@/lib/crypto";
-import type { LLMProviderName, OAuthTokens, SubscriptionTier } from "@/types";
+import type { LLMProviderName, OAuthTokens, PiOAuthCredentials, SubscriptionTier } from "@/types";
 
 interface OAuthTokenRow {
   provider: string;
@@ -42,6 +42,52 @@ export function getOAuthTokens(
     subscriptionTier: (row.subscription_tier || "unknown") as SubscriptionTier,
     subscriptionMetadata: metadata,
   };
+}
+
+/**
+ * Get stored credentials in pi-ai's OAuthCredentials format.
+ * Returns null if no tokens exist for the provider.
+ */
+export function getPiCredentials(
+  provider: LLMProviderName
+): PiOAuthCredentials | null {
+  const tokens = getOAuthTokens(provider);
+  if (!tokens) return null;
+
+  // Parse extra metadata fields that pi-ai providers may have stored
+  const extra = tokens.subscriptionMetadata?.piExtra || {};
+
+  return {
+    access: tokens.accessToken,
+    refresh: tokens.refreshToken || "",
+    expires: tokens.expiresAt ? new Date(tokens.expiresAt).getTime() : 0,
+    ...extra,
+  };
+}
+
+/**
+ * Store pi-ai OAuthCredentials in our encrypted DB.
+ */
+export function upsertPiCredentials(
+  provider: LLMProviderName,
+  credentials: PiOAuthCredentials,
+  tier: SubscriptionTier = "unknown",
+  metadata: Record<string, any> = {},
+): void {
+  // Extract known fields, store the rest as piExtra
+  const { access, refresh, expires, ...extra } = credentials;
+  const mergedMetadata = { ...metadata, piExtra: extra };
+
+  upsertOAuthTokens({
+    provider,
+    accessToken: access,
+    refreshToken: refresh || null,
+    tokenType: "bearer",
+    expiresAt: expires ? new Date(expires).toISOString() : null,
+    scope: null,
+    subscriptionTier: tier,
+    subscriptionMetadata: mergedMetadata,
+  });
 }
 
 export function upsertOAuthTokens(tokens: OAuthTokens): void {

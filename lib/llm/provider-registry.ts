@@ -5,7 +5,8 @@ import { AnthropicProvider } from "./anthropic-provider";
 import { GeminiProvider } from "./gemini-provider";
 import { OllamaProvider } from "./ollama-provider";
 import { getValidAccessToken } from "@/lib/oauth/token-refresh";
-import type { LLMProviderName, Settings } from "@/types";
+import { isPiOAuthMode } from "@/lib/oauth/pi-auth";
+import type { LLMProviderName, AuthMode, Settings } from "@/types";
 
 /**
  * Resolve the credential (API key or OAuth token) for a provider.
@@ -30,17 +31,18 @@ function getApiKey(
 async function resolveCredential(
   provider: LLMProviderName,
   settings: Settings
-): Promise<string> {
+): Promise<{ credential: string; isOAuthToken: boolean }> {
   const authModeKey = `${provider}AuthMode` as keyof Settings;
-  const authMode = settings[authModeKey] as string;
+  const authMode = (settings[authModeKey] as AuthMode) || "api_key";
 
-  if (authMode === "oauth") {
+  if (isPiOAuthMode(authMode)) {
     try {
-      return await getValidAccessToken(provider);
+      const token = await getValidAccessToken(provider);
+      return { credential: token, isOAuthToken: true };
     } catch {
       // OAuth tokens not available yet; fall back to API key if present
       const apiKey = getApiKey(provider, settings);
-      if (apiKey) return apiKey;
+      if (apiKey) return { credential: apiKey, isOAuthToken: false };
       throw new Error(
         `No OAuth tokens found for ${provider} and no API key configured. Please sign in or add an API key.`
       );
@@ -49,22 +51,23 @@ async function resolveCredential(
 
   // API key mode (default)
   const apiKey = getApiKey(provider, settings);
-  if (apiKey) return apiKey;
+  if (apiKey) return { credential: apiKey, isOAuthToken: false };
   throw new Error(`${provider} API key not configured`);
 }
 
 function createProvider(
   name: LLMProviderName,
   credential: string,
-  settings: Settings
+  settings: Settings,
+  isOAuthToken = false
 ): BaseLLMProvider {
   switch (name) {
     case "openai":
       return new OpenAIProvider(credential);
     case "anthropic":
-      return new AnthropicProvider(credential);
+      return new AnthropicProvider(credential, isOAuthToken);
     case "gemini":
-      return new GeminiProvider(credential);
+      return new GeminiProvider(credential, isOAuthToken);
     case "ollama":
       return new OllamaProvider(settings.ollamaBaseUrl);
     default:
@@ -116,30 +119,40 @@ export async function getProviderAsync(
     return new OllamaProvider(s.ollamaBaseUrl);
   }
 
-  const credential = await resolveCredential(name, s);
-  return createProvider(name, credential, s);
+  const { credential, isOAuthToken } = await resolveCredential(name, s);
+  return createProvider(name, credential, s, isOAuthToken);
+}
+
+/** Resolve the effective embedding provider (auto-follows active unless overridden). */
+function resolveEmbeddingProvider(s: Settings): LLMProviderName {
+  return s.embeddingProviderOverride ? s.embeddingProvider : s.activeProvider;
+}
+
+/** Resolve the effective preview provider (auto-follows active unless overridden). */
+function resolvePreviewProvider(s: Settings): LLMProviderName {
+  return s.previewProviderOverride ? s.previewProvider : s.activeProvider;
 }
 
 export function getEmbeddingProvider(settings?: Settings): BaseLLMProvider {
   const s = settings || getSettings();
-  return getProvider(s.embeddingProvider, s);
+  return getProvider(resolveEmbeddingProvider(s), s);
 }
 
 export async function getEmbeddingProviderAsync(
   settings?: Settings
 ): Promise<BaseLLMProvider> {
   const s = settings || getSettings();
-  return getProviderAsync(s.embeddingProvider, s);
+  return getProviderAsync(resolveEmbeddingProvider(s), s);
 }
 
 export function getPreviewProvider(settings?: Settings): BaseLLMProvider {
   const s = settings || getSettings();
-  return getProvider(s.previewProvider, s);
+  return getProvider(resolvePreviewProvider(s), s);
 }
 
 export async function getPreviewProviderAsync(
   settings?: Settings
 ): Promise<BaseLLMProvider> {
   const s = settings || getSettings();
-  return getProviderAsync(s.previewProvider, s);
+  return getProviderAsync(resolvePreviewProvider(s), s);
 }

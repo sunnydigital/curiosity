@@ -1,4 +1,4 @@
-# curiosityLM
+# Curiosity
 
 ## A notebook for the curious
 

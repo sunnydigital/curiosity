@@ -1,76 +1,60 @@
-import type { LLMProviderName } from "@/types";
+import type { LLMProviderName, AuthMode } from "@/types";
+import { getSettings } from "@/db/queries/settings";
+import { getPiCredentials, upsertPiCredentials } from "@/db/queries/oauth-tokens";
 import {
-  getOAuthTokens,
-  upsertOAuthTokens,
-  isTokenExpired,
-} from "@/db/queries/oauth-tokens";
-import { getOAuthConfig } from "./config";
+  refreshCredentials,
+  getApiKeyFromCredentials,
+  isCredentialsExpired,
+  authModeToPiProvider,
+  type PiOAuthProviderId,
+} from "./pi-auth";
 
 /**
- * Returns a valid access token for the given provider.
- * If the token is expired and a refresh token is available, it will be refreshed.
- * Throws if no OAuth tokens exist or refresh fails.
+ * Returns a valid access token (API key) for the given provider.
+ * If the token is expired and a refresh token is available, it will be refreshed
+ * using pi-ai's provider-specific refresh logic.
  */
 export async function getValidAccessToken(
   provider: LLMProviderName
 ): Promise<string> {
-  const tokens = getOAuthTokens(provider);
-  if (!tokens) {
+  const settings = getSettings();
+  const authModeKey = `${provider}AuthMode` as keyof typeof settings;
+  const authMode = (settings[authModeKey] as AuthMode) || "api_key";
+
+  const piProviderId = authModeToPiProvider(provider, authMode);
+  if (!piProviderId) {
+    throw new Error(
+      `No pi-ai OAuth provider mapping for ${provider} with auth mode ${authMode}`
+    );
+  }
+
+  const credentials = getPiCredentials(provider);
+  if (!credentials) {
     throw new Error(
       `No OAuth tokens found for ${provider}. Please sign in first.`
     );
   }
 
-  if (!isTokenExpired(tokens)) {
-    return tokens.accessToken;
+  // If not expired, return the API key directly
+  if (!isCredentialsExpired(credentials)) {
+    return getApiKeyFromCredentials(piProviderId, credentials);
   }
 
-  // Token is expired, attempt refresh
-  if (!tokens.refreshToken) {
+  // Token is expired — try to refresh
+  if (!credentials.refresh) {
     throw new Error(
       `OAuth token for ${provider} has expired and no refresh token is available. Please sign in again.`
     );
   }
 
-  const config = getOAuthConfig(provider);
-  if (!config) {
+  try {
+    const newCredentials = await refreshCredentials(piProviderId, credentials);
+    // Store the refreshed credentials
+    upsertPiCredentials(provider, newCredentials);
+    return getApiKeyFromCredentials(piProviderId, newCredentials);
+  } catch (err: any) {
     throw new Error(
-      `OAuth configuration not available for ${provider}. Check environment variables.`
+      `Failed to refresh OAuth token for ${provider}: ${err.message}`
     );
   }
-
-  const response = await fetch(config.tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: tokens.refreshToken,
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(
-      `Failed to refresh OAuth token for ${provider}: ${response.status} ${errorBody}`
-    );
-  }
-
-  const data = await response.json();
-
-  const updatedTokens = {
-    ...tokens,
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token || tokens.refreshToken,
-    tokenType: data.token_type || tokens.tokenType,
-    expiresAt: data.expires_in
-      ? new Date(Date.now() + data.expires_in * 1000).toISOString()
-      : tokens.expiresAt,
-    scope: data.scope || tokens.scope,
-  };
-
-  upsertOAuthTokens(updatedTokens);
-
-  return updatedTokens.accessToken;
 }

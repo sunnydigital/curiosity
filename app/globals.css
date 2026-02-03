@@ -225,6 +225,45 @@
   --tw-prose-code: var(--color-primary-foreground);
 }
 
+/* Fix KaTeX colors in user messages (primary background) */
+.bg-primary .katex,
+.bg-primary .katex .mord,
+.bg-primary .katex .mopen,
+.bg-primary .katex .mclose,
+.bg-primary .katex .minner,
+.bg-primary .katex .mop,
+.bg-primary .katex .mrel,
+.bg-primary .katex .mbin,
+.bg-primary .katex .mpunct {
+  color: var(--color-primary-foreground) !important;
+}
+
+/* Fix KaTeX colors in AI messages for light mode */
+:root .bg-muted .katex,
+:root .bg-muted .katex .mord,
+:root .bg-muted .katex .mopen,
+:root .bg-muted .katex .mclose,
+:root .bg-muted .katex .minner,
+:root .bg-muted .katex .mop,
+:root .bg-muted .katex .mrel,
+:root .bg-muted .katex .mbin,
+:root .bg-muted .katex .mpunct {
+  color: #0a0a0a !important;
+}
+
+/* Fix KaTeX colors in AI messages for dark mode */
+.dark .bg-muted .katex,
+.dark .bg-muted .katex .mord,
+.dark .bg-muted .katex .mopen,
+.dark .bg-muted .katex .mclose,
+.dark .bg-muted .katex .minner,
+.dark .bg-muted .katex .mop,
+.dark .bg-muted .katex .mrel,
+.dark .bg-muted .katex .mbin,
+.dark .bg-muted .katex .mpunct {
+  color: #fafafa !important;
+}
+
 /* Typing-bubble dots: fade in left-to-right then reset */
 @keyframes typing-dot {
   0%, 20% {
