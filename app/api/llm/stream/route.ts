@@ -67,9 +67,55 @@ export async function POST(request: NextRequest) {
           )
         );
 
+        // Auto-title chat early (before streaming) so the sidebar updates immediately
+        const chat = getChat(chatId);
+        if (chat && chat.title === "New Chat") {
+          const titleMessages: LLMMessage[] = [
+            {
+              role: "user",
+              content: `Generate a short title (3-6 words) for a conversation that starts with this message. Return only the title, no quotes or punctuation.\n\n${content}`,
+            },
+          ];
+
+          let title = "";
+          try {
+            const titleProvider = await getPreviewProviderAsync(settings);
+            const r = await titleProvider.complete({
+              model: settings.previewModel,
+              messages: titleMessages,
+              temperature: 0.7,
+              maxTokens: 30,
+            });
+            title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
+          } catch {
+            try {
+              const fallbackProvider = await getProviderAsync(settings.activeProvider, settings);
+              const r = await fallbackProvider.complete({
+                model: settings.activeModel,
+                messages: titleMessages,
+                temperature: 0.7,
+                maxTokens: 30,
+              });
+              title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
+            } catch {
+              // Title generation is best-effort
+            }
+          }
+
+          if (title) {
+            renameChat(chatId, title);
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ type: "title_updated", title })}\n\n`
+              )
+            );
+          }
+        }
+
         let actualProvider = settings.activeProvider;
         let actualModel = settings.activeModel;
         let gen: AsyncGenerator<{ content: string; done: boolean }, void, unknown>;
+
 
         if (settings.failoverEnabled && settings.failoverChain.length > 0) {
           // Use failover executor
@@ -143,52 +189,6 @@ export async function POST(request: NextRequest) {
         onNewExchange(chatId, userMessage.id, content, fullContent).catch(
           () => { }
         );
-
-        // Auto-title chat if it's the first exchange (use lightweight preview model)
-        const chat = getChat(chatId);
-        if (chat && chat.title === "New Chat") {
-          const titleMessages: LLMMessage[] = [
-            {
-              role: "user",
-              content: `Generate a short title (3-6 words) for the following conversation. Return only the title, no quotes or punctuation.\n\nUser: ${content}\nAssistant: ${fullContent.slice(0, 500)}`,
-            },
-          ];
-
-          let title = "";
-          // Try preview provider first, fall back to active provider
-          try {
-            const titleProvider = await getPreviewProviderAsync(settings);
-            const r = await titleProvider.complete({
-              model: settings.previewModel,
-              messages: titleMessages,
-              temperature: 0.7,
-              maxTokens: 30,
-            });
-            title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
-          } catch {
-            try {
-              const fallbackProvider = await getProviderAsync(settings.activeProvider, settings);
-              const r = await fallbackProvider.complete({
-                model: settings.activeModel,
-                messages: titleMessages,
-                temperature: 0.7,
-                maxTokens: 30,
-              });
-              title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
-            } catch {
-              // Title generation is best-effort
-            }
-          }
-
-          if (title) {
-            renameChat(chatId, title);
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({ type: "title_updated", title })}\n\n`
-              )
-            );
-          }
-        }
 
         controller.close();
       } catch (error: any) {

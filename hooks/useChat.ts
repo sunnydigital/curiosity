@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { Message, FailoverEvent } from "@/types";
 
 interface UseChatOptions {
@@ -21,6 +21,29 @@ export function useChat({ chatId }: UseChatOptions) {
   messagesRef.current = messages;
   const activePathRef = useRef<string[]>(activePath);
   activePathRef.current = activePath;
+  const streamingContentRef = useRef<string>("");
+  const lastUserMessageIdRef = useRef<string | null>(null);
+  const pendingBranchNavRef = useRef<string | null>(null);
+
+  // Navigate to a branch root once it appears in messages state.
+  // This ensures activePath is only set AFTER messages contains the branch root,
+  // avoiding a render where activePath references an ID not yet in messages.
+  useEffect(() => {
+    const branchRootId = pendingBranchNavRef.current;
+    if (!branchRootId) return;
+    if (!messages.some((m) => m.id === branchRootId)) return;
+
+    pendingBranchNavRef.current = null;
+    // Build path from root to branch root
+    const pathToRoot: string[] = [];
+    let cur = messages.find((m) => m.id === branchRootId);
+    while (cur) {
+      pathToRoot.unshift(cur.id);
+      if (!cur.parentId) break;
+      cur = messages.find((m) => m.id === cur!.parentId);
+    }
+    setActivePath(pathToRoot);
+  }, [messages]);
 
   const fetchMessages = useCallback(async () => {
     try {
@@ -58,6 +81,8 @@ export function useChat({ chatId }: UseChatOptions) {
     async (content: string, parentId?: string | null, image?: File) => {
       setIsLoading(true);
       setStreamingContent("");
+      streamingContentRef.current = "";
+      lastUserMessageIdRef.current = null;
       setError(null);
 
       abortRef.current = new AbortController();
@@ -106,11 +131,14 @@ export function useChat({ chatId }: UseChatOptions) {
               const event = JSON.parse(json);
               if (event.type === "user_message") {
                 setMessages((prev) => [...prev, event.message]);
+                lastUserMessageIdRef.current = event.message.id;
               } else if (event.type === "chunk") {
+                streamingContentRef.current += event.content;
                 setStreamingContent((prev) => prev + event.content);
               } else if (event.type === "done") {
                 setMessages((prev) => [...prev, event.message]);
                 setStreamingContent("");
+                streamingContentRef.current = "";
               } else if (event.type === "title_updated") {
                 window.dispatchEvent(new CustomEvent("refresh-sidebar"));
               } else if (event.type === "failover") {
@@ -158,6 +186,8 @@ export function useChat({ chatId }: UseChatOptions) {
     async (userMessageId: string) => {
       setIsLoading(true);
       setStreamingContent("");
+      streamingContentRef.current = "";
+      lastUserMessageIdRef.current = userMessageId;
       setError(null);
 
       abortRef.current = new AbortController();
@@ -190,10 +220,12 @@ export function useChat({ chatId }: UseChatOptions) {
             try {
               const event = JSON.parse(json);
               if (event.type === "chunk") {
+                streamingContentRef.current += event.content;
                 setStreamingContent((prev) => prev + event.content);
               } else if (event.type === "done") {
                 setMessages((prev) => [...prev, event.message]);
                 setStreamingContent("");
+                streamingContentRef.current = "";
               } else if (event.type === "title_updated") {
                 window.dispatchEvent(new CustomEvent("refresh-sidebar"));
               } else if (event.type === "failover") {
@@ -219,6 +251,92 @@ export function useChat({ chatId }: UseChatOptions) {
     []
   );
 
+  const streamBranch = useCallback(
+    async (branchRequest: {
+      chatId: string;
+      sourceMessageId: string;
+      selectedText: string;
+      charStart: number;
+      charEnd: number;
+      branchType: string;
+      customPrompt?: string;
+    }): Promise<string | null> => {
+      setIsLoading(true);
+      setStreamingContent("");
+      streamingContentRef.current = "";
+      lastUserMessageIdRef.current = null;
+      setError(null);
+
+      abortRef.current = new AbortController();
+      let branchRootId: string | null = null;
+
+      try {
+        const response = await fetch(`/api/chat/${branchRequest.chatId}/branch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(branchRequest),
+          signal: abortRef.current.signal,
+        });
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("No response body");
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const json = line.slice(6);
+            try {
+              const event = JSON.parse(json);
+              if (event.type === "branch_root") {
+                // Add branch root to messages; navigation happens in the
+                // pendingBranchNav effect once messages state updates
+                const branchRoot = event.message as Message;
+                branchRootId = branchRoot.id;
+                lastUserMessageIdRef.current = branchRoot.id;
+                pendingBranchNavRef.current = branchRoot.id;
+                setMessages((prev) => [...prev, branchRoot]);
+              } else if (event.type === "chunk") {
+                streamingContentRef.current += event.content;
+                setStreamingContent((prev) => prev + event.content);
+              } else if (event.type === "done") {
+                setMessages((prev) => [...prev, event.message]);
+                setStreamingContent("");
+                streamingContentRef.current = "";
+              } else if (event.type === "failover") {
+                setFailoverNotice(event as FailoverEvent);
+                setTimeout(() => setFailoverNotice(null), 8000);
+              } else if (event.type === "error") {
+                setError(event.error);
+              }
+            } catch {
+              // ignore parse errors
+            }
+          }
+        }
+      } catch (err: any) {
+        if (err.name !== "AbortError") {
+          setError(err.message);
+        }
+      } finally {
+        setIsLoading(false);
+        abortRef.current = null;
+      }
+
+      return branchRootId;
+    },
+    [chatId]
+  );
+
   const removeMessage = useCallback(
     async (messageId: string): Promise<string | null> => {
       const message = messages.find((m) => m.id === messageId);
@@ -242,7 +360,30 @@ export function useChat({ chatId }: UseChatOptions) {
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
-  }, []);
+
+    const partialContent = streamingContentRef.current;
+    const parentId = lastUserMessageIdRef.current;
+
+    if (partialContent && parentId) {
+      // Save partial content to DB so it persists across navigation
+      fetch(`/api/chat/${chatId}/messages/partial`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: partialContent, parentId }),
+      })
+        .then((r) => r.json())
+        .then((savedMessage) => {
+          if (savedMessage?.id) {
+            setMessages((prev) => [...prev, savedMessage]);
+            setStreamingContent("");
+            streamingContentRef.current = "";
+          }
+        })
+        .catch(() => {
+          // Best-effort; partial content remains visible via streamingContent
+        });
+    }
+  }, [chatId]);
 
   const getPathMessages = useCallback(
     (path?: string[]): Message[] => {
@@ -324,6 +465,7 @@ export function useChat({ chatId }: UseChatOptions) {
     failoverNotice,
     fetchMessages,
     sendMessage,
+    streamBranch,
     stopStreaming,
     retryMessage,
     removeMessage,

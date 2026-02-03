@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { BaseLLMProvider } from "./types";
+import { getModelMetadata } from "./pi-models";
 import type {
   LLMCompletionRequest,
   LLMCompletionResponse,
@@ -8,13 +9,60 @@ import type {
   EmbeddingResponse,
 } from "@/types";
 
+/** Extract the chatgpt_account_id from an OpenAI OAuth JWT access token. */
+function extractAccountId(token: string): string | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(atob(parts[1]));
+    return payload?.["https://api.openai.com/auth"]?.chatgpt_account_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export class OpenAIProvider extends BaseLLMProvider {
   name = "openai" as const;
   private client: OpenAI;
 
-  constructor(apiKey: string) {
+  constructor(credential: string, isOAuthToken = false) {
     super();
-    this.client = new OpenAI({ apiKey });
+    if (isOAuthToken) {
+      const accountId = extractAccountId(credential);
+      this.client = new OpenAI({
+        apiKey: credential,
+        defaultHeaders: {
+          ...(accountId ? { "chatgpt-account-id": accountId } : {}),
+        },
+      });
+    } else {
+      this.client = new OpenAI({ apiKey: credential });
+    }
+  }
+
+  /** Reasoning models don't support temperature and use max_completion_tokens. */
+  private isReasoningModel(model: string): boolean {
+    const meta = getModelMetadata("openai", model);
+    if (meta) return meta.reasoning;
+    // Fallback for models not in pi-ai registry
+    return /^o\d/.test(model);
+  }
+
+  private buildParams(req: LLMCompletionRequest, extra?: Record<string, any>) {
+    const reasoning = this.isReasoningModel(req.model);
+    return {
+      model: req.model,
+      messages: this.formatMessages(req.messages) as any,
+      // Reasoning models reject the temperature parameter
+      ...(reasoning ? {} : { temperature: req.temperature ?? 0.7 }),
+      // Reasoning models use max_completion_tokens; others use max_tokens
+      ...(req.maxTokens
+        ? reasoning
+          ? { max_completion_tokens: req.maxTokens }
+          : { max_tokens: req.maxTokens }
+        : {}),
+      ...extra,
+    };
   }
 
   private formatMessages(messages: LLMCompletionRequest["messages"]) {
@@ -36,12 +84,9 @@ export class OpenAIProvider extends BaseLLMProvider {
   }
 
   async complete(req: LLMCompletionRequest): Promise<LLMCompletionResponse> {
-    const response = await this.client.chat.completions.create({
-      model: req.model,
-      messages: this.formatMessages(req.messages) as any,
-      temperature: req.temperature ?? 0.7,
-      max_tokens: req.maxTokens,
-    });
+    const response = await this.client.chat.completions.create(
+      this.buildParams(req)
+    );
 
     return {
       content: response.choices[0]?.message?.content || "",
@@ -61,11 +106,8 @@ export class OpenAIProvider extends BaseLLMProvider {
     req: LLMCompletionRequest
   ): AsyncGenerator<LLMStreamChunk, void, unknown> {
     const response = await this.client.chat.completions.create({
-      model: req.model,
-      messages: this.formatMessages(req.messages) as any,
-      temperature: req.temperature ?? 0.7,
-      max_tokens: req.maxTokens,
-      stream: true,
+      ...this.buildParams(req),
+      stream: true as const,
     });
 
     for await (const chunk of response) {

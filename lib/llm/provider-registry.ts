@@ -63,7 +63,7 @@ function createProvider(
 ): BaseLLMProvider {
   switch (name) {
     case "openai":
-      return new OpenAIProvider(credential);
+      return new OpenAIProvider(credential, isOAuthToken);
     case "anthropic":
       return new AnthropicProvider(credential, isOAuthToken);
     case "gemini":

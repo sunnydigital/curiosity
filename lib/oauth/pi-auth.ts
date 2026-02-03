@@ -16,11 +16,224 @@
 import {
   getOAuthProvider,
   getOAuthProviders,
+  registerOAuthProvider,
+  refreshGoogleCloudToken,
   type OAuthCredentials,
   type OAuthLoginCallbacks,
+  type OAuthProviderInterface,
 } from "@mariozechner/pi-ai";
 import crypto from "crypto";
 import type { LLMProviderName, AuthMode } from "@/types";
+import { upsertPiCredentials } from "@/db/queries/oauth-tokens";
+import { updateSettings } from "@/db/queries/settings";
+import { fetchSubscriptionTier } from "@/lib/oauth/subscription-info";
+import { DEFAULT_MODELS } from "@/lib/llm/model-equivalents";
+
+// ── Custom Gemini CLI provider (skips Cloud Code Assist project discovery) ──
+//
+// pi-ai's built-in google-gemini-cli provider calls `discoverProject()` after
+// the OAuth token exchange, which provisions a Cloud Code Assist project and
+// can hang or fail. We only need the OAuth access token to call the public
+// generativelanguage.googleapis.com API, so we register a replacement provider
+// that performs the same PKCE + local-server OAuth dance but returns
+// immediately after the token exchange.
+
+const GEMINI_CLIENT_ID = atob("NjgxMjU1ODA5Mzk1LW9vOGZ0Mm9wcmRybnA5ZTNhcWY2YXYzaG1kaWIxMzVqLmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29t");
+const GEMINI_CLIENT_SECRET = atob("R09DU1BYLTR1SGdNUG0tMW83U2stZ2VWNkN1NWNsWEZzeGw=");
+const GEMINI_REDIRECT_URI = "http://localhost:8085/oauth2callback";
+const GEMINI_SCOPES = [
+  "https://www.googleapis.com/auth/cloud-platform",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+];
+const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+
+async function generatePKCE(): Promise<{ verifier: string; challenge: string }> {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues
+    ? crypto.getRandomValues(array)
+    : crypto.randomFillSync(array);
+  const verifier = Buffer.from(array).toString("base64url");
+  const hash = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(verifier)
+  );
+  const challenge = Buffer.from(hash).toString("base64url");
+  return { verifier, challenge };
+}
+
+async function startGeminiCallbackServer(): Promise<{
+  server: import("http").Server;
+  cancelWait: () => void;
+  waitForCode: () => Promise<{ code: string; state: string } | null>;
+}> {
+  const http = await import("http");
+  return new Promise((resolve, reject) => {
+    let result: { code: string; state: string } | null = null;
+    let cancelled = false;
+    const server = http.createServer((req, res) => {
+      const url = new URL(req.url || "", "http://localhost:8085");
+      if (url.pathname === "/oauth2callback") {
+        const code = url.searchParams.get("code");
+        const state = url.searchParams.get("state");
+        const error = url.searchParams.get("error");
+        if (error) {
+          res.writeHead(400, { "Content-Type": "text/html" });
+          res.end(`<html><body><h1>Authentication Failed</h1><p>${error}</p></body></html>`);
+          return;
+        }
+        if (code && state) {
+          res.writeHead(200, { "Content-Type": "text/html" });
+          res.end(`<html><body><h1>Authentication Successful</h1><p>You can close this window.</p></body></html>`);
+          result = { code, state };
+        } else {
+          res.writeHead(400, { "Content-Type": "text/html" });
+          res.end(`<html><body><h1>Authentication Failed</h1><p>Missing code or state.</p></body></html>`);
+        }
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    server.on("error", reject);
+    server.listen(8085, "127.0.0.1", () => {
+      resolve({
+        server,
+        cancelWait: () => { cancelled = true; },
+        waitForCode: async () => {
+          while (!result && !cancelled) {
+            await new Promise((r) => setTimeout(r, 100));
+          }
+          return result;
+        },
+      });
+    });
+  });
+}
+
+/**
+ * Simplified Gemini CLI OAuth: same PKCE + local-server flow as pi-ai,
+ * but returns immediately after token exchange (no project discovery).
+ */
+async function loginGeminiCliSimple(
+  onAuth: (info: { url: string; instructions?: string }) => void,
+  onProgress?: (message: string) => void,
+  onManualCodeInput?: () => Promise<string>,
+): Promise<OAuthCredentials> {
+  const { verifier, challenge } = await generatePKCE();
+
+  onProgress?.("Starting local server for OAuth callback...");
+  const callbackServer = await startGeminiCallbackServer();
+
+  let code: string | undefined;
+  try {
+    const authParams = new URLSearchParams({
+      client_id: GEMINI_CLIENT_ID,
+      response_type: "code",
+      redirect_uri: GEMINI_REDIRECT_URI,
+      scope: GEMINI_SCOPES.join(" "),
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      state: verifier,
+      access_type: "offline",
+      prompt: "consent",
+    });
+    const authUrl = `${GOOGLE_AUTH_URL}?${authParams.toString()}`;
+    onAuth({ url: authUrl, instructions: "Complete the sign-in in your browser." });
+
+    onProgress?.("Waiting for OAuth callback...");
+
+    if (onManualCodeInput) {
+      // Race: local callback server vs manual code input
+      let manualInput: string | undefined;
+      let manualError: Error | undefined;
+      const manualPromise = onManualCodeInput()
+        .then((input) => { manualInput = input; callbackServer.cancelWait(); })
+        .catch((err) => { manualError = err instanceof Error ? err : new Error(String(err)); callbackServer.cancelWait(); });
+
+      const result = await callbackServer.waitForCode();
+      if (manualError) throw manualError;
+      if (result?.code) {
+        if (result.state !== verifier) throw new Error("OAuth state mismatch");
+        code = result.code;
+      } else if (manualInput) {
+        try {
+          const url = new URL(manualInput.trim());
+          code = url.searchParams.get("code") ?? undefined;
+        } catch {
+          code = manualInput.trim();
+        }
+      }
+      if (!code) {
+        await manualPromise;
+        if (manualError) throw manualError;
+      }
+    } else {
+      const result = await callbackServer.waitForCode();
+      if (result?.code) {
+        if (result.state !== verifier) throw new Error("OAuth state mismatch");
+        code = result.code;
+      }
+    }
+
+    if (!code) throw new Error("No authorization code received");
+
+    onProgress?.("Exchanging authorization code for tokens...");
+    const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: GEMINI_CLIENT_ID,
+        client_secret: GEMINI_CLIENT_SECRET,
+        code,
+        grant_type: "authorization_code",
+        redirect_uri: GEMINI_REDIRECT_URI,
+        code_verifier: verifier,
+      }),
+    });
+    if (!tokenResponse.ok) {
+      const error = await tokenResponse.text();
+      throw new Error(`Token exchange failed: ${error}`);
+    }
+    const tokenData = await tokenResponse.json();
+    if (!tokenData.refresh_token) {
+      throw new Error("No refresh token received. Please try again.");
+    }
+
+    onProgress?.("Connected successfully.");
+    return {
+      refresh: tokenData.refresh_token,
+      access: tokenData.access_token,
+      expires: Date.now() + tokenData.expires_in * 1000 - 5 * 60 * 1000,
+    };
+  } finally {
+    callbackServer.server.close();
+  }
+}
+
+// Register our simplified provider, overriding pi-ai's built-in
+registerOAuthProvider({
+  id: "google-gemini-cli",
+  name: "Google Gemini CLI (simplified)",
+  usesCallbackServer: true,
+  async login(callbacks: OAuthLoginCallbacks) {
+    return loginGeminiCliSimple(
+      callbacks.onAuth,
+      callbacks.onProgress,
+      callbacks.onManualCodeInput,
+    );
+  },
+  async refreshToken(credentials: OAuthCredentials) {
+    // Use pi-ai's refresh function — it only hits Google's token endpoint,
+    // no project discovery. Pass empty projectId since we don't use it.
+    return refreshGoogleCloudToken(credentials.refresh, (credentials as any).projectId || "");
+  },
+  getApiKey(credentials: OAuthCredentials) {
+    // Return just the access token — no JSON wrapping needed
+    return credentials.access;
+  },
+} satisfies OAuthProviderInterface);
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -49,6 +262,14 @@ interface PendingLoginEntry {
   authUrl: string;
   instructions?: string;
   createdAt: number;
+  /** Set to true when credentialsPromise resolves (e.g. local server caught callback). */
+  resolved: boolean;
+  /** Populated when credentialsPromise resolves. */
+  credentials: OAuthCredentials | null;
+  /** Populated when credentialsPromise rejects. */
+  error: string | null;
+  /** Latest progress message from the provider (e.g. "Exchanging code..."). */
+  progress: string | null;
 }
 
 // ── In-memory pending login sessions ─────────────────────────────────
@@ -134,7 +355,18 @@ export function startLogin(providerId: PiOAuthProviderId): PendingLogin {
     authUrl: "", // will be set once resolved
     instructions: undefined,
     createdAt: Date.now(),
+    resolved: false,
+    credentials: null,
+    error: null,
+    progress: null,
   };
+  // Track when credentialsPromise resolves (e.g. local server won the race)
+  credentialsPromise.then((creds) => {
+    entry.resolved = true;
+    entry.credentials = creds;
+  }).catch((err) => {
+    entry.error = err instanceof Error ? err.message : String(err);
+  });
   pendingLogins.set(sessionId, entry);
 
   // Return a wrapper that waits for the auth URL
@@ -197,6 +429,31 @@ export async function completeLogin(
 }
 
 /**
+ * Poll a pending login session to check if pi-ai's local callback server
+ * has already captured the authorization code and resolved credentials.
+ * Returns the credentials if resolved, or null if still pending.
+ */
+export function pollLoginSession(
+  sessionId: string,
+): { resolved: true; credentials: OAuthCredentials } | { resolved: false; error?: string; progress?: string } | null {
+  const entry = pendingLogins.get(sessionId);
+  if (!entry) return null; // session not found or expired
+
+  if (entry.resolved && entry.credentials) {
+    // Credentials are ready — clean up the session
+    pendingLogins.delete(sessionId);
+    return { resolved: true, credentials: entry.credentials };
+  }
+
+  if (entry.error) {
+    pendingLogins.delete(sessionId);
+    return { resolved: false, error: entry.error };
+  }
+
+  return { resolved: false, progress: entry.progress ?? undefined };
+}
+
+/**
  * Cancel a pending login session.
  */
 export function cancelLogin(sessionId: string): void {
@@ -237,10 +494,13 @@ export function getApiKeyFromCredentials(
 }
 
 /**
- * Check if credentials are expired (with 5-minute buffer).
+ * Check if credentials are expired (with 1-minute safety buffer).
+ * Note: some credential sources (e.g. our Gemini CLI login) already
+ * subtract a 5-minute buffer at creation time, so we keep this
+ * additional buffer small to avoid double-buffering.
  */
 export function isCredentialsExpired(credentials: OAuthCredentials): boolean {
-  const bufferMs = 5 * 60 * 1000;
+  const bufferMs = 60 * 1000; // 1 minute
   return Date.now() >= credentials.expires - bufferMs;
 }
 
@@ -265,8 +525,26 @@ export function listOAuthProviders(): Array<{ id: string; name: string }> {
 const _originalStartLogin = startLogin;
 
 // Re-export a version that properly wires up the authUrl capture
-export function startLoginSession(providerId: PiOAuthProviderId): { sessionId: string; credentialsPromise: Promise<OAuthCredentials> } {
+export async function startLoginSession(
+  providerId: PiOAuthProviderId,
+  persistInfo?: { providerName: LLMProviderName; authMode: AuthMode },
+): Promise<{ sessionId: string; credentialsPromise: Promise<OAuthCredentials> }> {
   cleanExpiredSessions();
+
+  // Cancel any existing pending sessions to release resources (e.g. port 8085)
+  // before starting a new login for the same provider.
+  let hadPending = false;
+  for (const [id, entry] of pendingLogins) {
+    if (!entry.resolved && !entry.error) {
+      entry.rejectCode(new Error("Login cancelled — new session started"));
+      pendingLogins.delete(id);
+      hadPending = true;
+    }
+  }
+  // Give the old callback server time to close before starting a new one
+  if (hadPending) {
+    await new Promise((r) => setTimeout(r, 500));
+  }
 
   const provider = getOAuthProvider(providerId);
   if (!provider) {
@@ -288,6 +566,10 @@ export function startLoginSession(providerId: PiOAuthProviderId): { sessionId: s
     authUrl: "",
     instructions: undefined,
     createdAt: Date.now(),
+    resolved: false,
+    credentials: null,
+    error: null,
+    progress: null,
   };
 
   const callbacks: OAuthLoginCallbacks = {
@@ -300,11 +582,52 @@ export function startLoginSession(providerId: PiOAuthProviderId): { sessionId: s
       }
     },
     onPrompt: async () => codePromise,
-    onProgress: () => {},
+    onProgress: (msg: string) => {
+      console.log(`[OAuth] Session ${sessionId} progress: ${msg}`);
+      entry.progress = msg;
+    },
     onManualCodeInput: async () => codePromise,
   };
 
   entry.credentialsPromise = provider.login(callbacks);
+  // Track when credentialsPromise resolves (e.g. local server won the race).
+  // Also auto-persist credentials to DB so they survive HMR resets that
+  // clear the in-memory pendingLogins Map before the poll route can read them.
+  entry.credentialsPromise.then(async (creds) => {
+    console.log(`[OAuth] Session ${sessionId}: credentials received`);
+    entry.resolved = true;
+    entry.credentials = creds;
+
+    // Auto-persist to DB if provider info was supplied
+    if (persistInfo) {
+      try {
+        let tier = "unknown";
+        let metadata: Record<string, any> = {};
+        try {
+          const apiKey = getApiKeyFromCredentials(providerId, creds);
+          const sub = await fetchSubscriptionTier(persistInfo.providerName, apiKey);
+          tier = sub.tier;
+          metadata = sub.metadata;
+        } catch {
+          // Non-fatal — tier detection is best-effort
+        }
+        upsertPiCredentials(persistInfo.providerName, creds, tier as any, metadata);
+        const authModeKey = `${persistInfo.providerName}AuthMode` as const;
+        updateSettings({
+          [authModeKey]: persistInfo.authMode,
+          activeProvider: persistInfo.providerName,
+          activeModel: (DEFAULT_MODELS as any)[persistInfo.providerName] || DEFAULT_MODELS.openai,
+        });
+        console.log(`[OAuth] Session ${sessionId}: credentials auto-persisted for ${persistInfo.providerName}`);
+      } catch (persistErr) {
+        console.error(`[OAuth] Session ${sessionId}: auto-persist failed:`, persistErr);
+      }
+    }
+  }).catch((err) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[OAuth] Session ${sessionId}: login failed:`, msg);
+    entry.error = msg;
+  });
   pendingLogins.set(sessionId, entry);
 
   return { sessionId, credentialsPromise: entry.credentialsPromise };

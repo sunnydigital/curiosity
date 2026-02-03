@@ -52,6 +52,7 @@ export function ChatView({ chatId }: ChatViewProps) {
     failoverNotice,
     fetchMessages,
     sendMessage,
+    streamBranch,
     stopStreaming,
     retryMessage,
     removeMessage,
@@ -146,7 +147,7 @@ export function ChatView({ chatId }: ChatViewProps) {
 
   // Include a synthetic streaming message in the tree so it updates in real-time
   const treeMessages = useMemo(() => {
-    if (!isLoading || !streamingContent) return messages;
+    if (!streamingContent) return messages;
     const lastDisplayed = displayMessages[displayMessages.length - 1];
     if (!lastDisplayed) return messages;
     // Only add if there isn't already a real message being streamed
@@ -227,33 +228,23 @@ export function ChatView({ chatId }: ChatViewProps) {
   ) => {
     if (!selectionState) return;
 
-    try {
-      const res = await fetch(`/api/chat/${chatId}/branch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chatId,
-          sourceMessageId: selectionState.messageId,
-          selectedText: selectionState.selectedText,
-          charStart: selectionState.charStart,
-          charEnd: selectionState.charEnd,
-          branchType: type,
-          customPrompt,
-        }),
-      });
-
-      const data = await res.json();
-      const freshMessages = await fetchMessages();
-
-      if (data.branchRoot) {
-        navigateToBranch(data.branchRoot.id, freshMessages);
-      }
-    } catch (err) {
-      console.error("Branch creation failed:", err);
-    }
-
     setSelectionState(null);
     window.getSelection()?.removeAllRanges();
+
+    const branchRootId = await streamBranch({
+      chatId,
+      sourceMessageId: selectionState.messageId,
+      selectedText: selectionState.selectedText,
+      charStart: selectionState.charStart,
+      charEnd: selectionState.charEnd,
+      branchType: type,
+      customPrompt,
+    });
+
+    if (branchRootId) {
+      const fresh = await fetchMessages();
+      navigateToBranch(branchRootId, fresh);
+    }
   };
 
   // Keyboard shortcuts for branching
@@ -261,28 +252,20 @@ export function ChatView({ chatId }: ChatViewProps) {
     shortcuts,
     onBranch: (type, selectedText, messageId, charStart, charEnd, customPrompt) => {
       setSelectionState(null);
-      // Directly create branch
-      fetch(`/api/chat/${chatId}/branch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chatId,
-          sourceMessageId: messageId,
-          selectedText,
-          charStart,
-          charEnd,
-          branchType: type,
-          customPrompt,
-        }),
-      })
-        .then((r) => r.json().catch(() => null))
-        .then(async (data) => {
-          if (!data) return;
-          if (data.error) console.error("Branch error:", data.error);
-          const freshMessages = await fetchMessages();
-          if (data.branchRoot) navigateToBranch(data.branchRoot.id, freshMessages);
-        })
-        .catch(console.error);
+      streamBranch({
+        chatId,
+        sourceMessageId: messageId,
+        selectedText,
+        charStart,
+        charEnd,
+        branchType: type,
+        customPrompt,
+      }).then(async (branchRootId) => {
+        if (branchRootId) {
+          const fresh = await fetchMessages();
+          navigateToBranch(branchRootId, fresh);
+        }
+      });
     },
   });
 
@@ -335,13 +318,13 @@ export function ChatView({ chatId }: ChatViewProps) {
 
   // Detect if the last displayed message is a failed user message (no assistant child)
   const failedMessageId = useMemo(() => {
-    if (isLoading) return null;
+    if (isLoading || streamingContent) return null;
     const last = displayMessages[displayMessages.length - 1];
     if (!last || last.role !== "user") return null;
     // Check if there's any child message (assistant response)
     const hasChild = messages.some((m) => m.parentId === last.id);
     return hasChild ? null : last.id;
-  }, [displayMessages, messages, isLoading]);
+  }, [displayMessages, messages, isLoading, streamingContent]);
 
   const handleRetry = useCallback(
     (messageId: string) => {
@@ -422,8 +405,8 @@ export function ChatView({ chatId }: ChatViewProps) {
               />
             ))}
 
-            {/* Streaming assistant response — shown while the AI is generating */}
-            {isLoading && streamingContent && (
+            {/* Streaming assistant response — shown while generating or after interruption */}
+            {streamingContent && (
               <MessageBubble
                 key="streaming"
                 message={{
@@ -444,7 +427,7 @@ export function ChatView({ chatId }: ChatViewProps) {
                   model: null,
                   createdAt: new Date().toISOString(),
                 }}
-                isStreaming
+                isStreaming={isLoading}
                 streamingContent={streamingContent}
               />
             )}

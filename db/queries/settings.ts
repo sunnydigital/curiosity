@@ -35,6 +35,10 @@ interface SettingsRow {
   default_ollama_model: string;
   embedding_provider_override: number;
   preview_provider_override: number;
+  preview_openai_model: string;
+  preview_anthropic_model: string;
+  preview_gemini_model: string;
+  preview_ollama_model: string;
 }
 
 export function getSettings(): Settings {
@@ -79,6 +83,10 @@ export function getSettings(): Settings {
     defaultAnthropicModel: row.default_anthropic_model || "claude-sonnet-4-5-20250929",
     defaultGeminiModel: row.default_gemini_model || "gemini-2.5-flash",
     defaultOllamaModel: row.default_ollama_model || "llama3.2",
+    previewOpenaiModel: row.preview_openai_model || "gpt-5-mini",
+    previewAnthropicModel: row.preview_anthropic_model || "claude-haiku-4-5",
+    previewGeminiModel: row.preview_gemini_model || "gemini-2.5-flash",
+    previewOllamaModel: row.preview_ollama_model || "llama3.2",
     failoverEnabled: row.failover_enabled === 1,
     failoverChain,
   };
@@ -200,6 +208,22 @@ export function updateSettings(settings: Partial<Settings>): void {
   if (settings.defaultOllamaModel !== undefined) {
     updates.push("default_ollama_model = ?");
     values.push(settings.defaultOllamaModel);
+  }
+  if (settings.previewOpenaiModel !== undefined) {
+    updates.push("preview_openai_model = ?");
+    values.push(settings.previewOpenaiModel);
+  }
+  if (settings.previewAnthropicModel !== undefined) {
+    updates.push("preview_anthropic_model = ?");
+    values.push(settings.previewAnthropicModel);
+  }
+  if (settings.previewGeminiModel !== undefined) {
+    updates.push("preview_gemini_model = ?");
+    values.push(settings.previewGeminiModel);
+  }
+  if (settings.previewOllamaModel !== undefined) {
+    updates.push("preview_ollama_model = ?");
+    values.push(settings.previewOllamaModel);
   }
   if (settings.embeddingProviderOverride !== undefined) {
     updates.push("embedding_provider_override = ?");

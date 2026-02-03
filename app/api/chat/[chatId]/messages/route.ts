@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getMessagesByChat, createMessage, getPathToRoot } from "@/db/queries/messages";
 import { touchChat, renameChat, getChat } from "@/db/queries/chats";
 import { getSettings } from "@/db/queries/settings";
-import { getProvider } from "@/lib/llm/provider-registry";
+import { getProviderAsync } from "@/lib/llm/provider-registry";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/constants";
 import type { LLMMessage } from "@/types";
 
@@ -33,7 +33,7 @@ export async function POST(
   touchChat(chatId);
 
   const settings = getSettings();
-  const provider = getProvider(settings.activeProvider, settings);
+  const provider = await getProviderAsync(settings.activeProvider, settings);
 
   const contextMessages = parentId
     ? getPathToRoot(userMessage.id)

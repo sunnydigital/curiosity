@@ -51,14 +51,12 @@ export function MessageInput({
     }
   }, [initialContent, onInitialContentConsumed]);
 
-  // Auto-resize textarea up to 5 rows
+  // Auto-resize textarea to fit content (no max height cap)
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.style.height = "auto";
-    const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 20;
-    const maxHeight = lineHeight * 5 + 16; // 5 rows + padding
-    textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+    textarea.style.height = `${textarea.scrollHeight}px`;
   }, [content]);
 
   // Auto-dismiss notification
@@ -143,7 +141,7 @@ export function MessageInput({
         </div>
       )}
 
-      <div className="mx-auto flex max-w-3xl gap-2">
+      <div className="mx-auto flex max-w-3xl items-end gap-2">
         <input
           ref={fileInputRef}
           type="file"
@@ -166,12 +164,12 @@ export function MessageInput({
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
-          className="min-h-[44px] resize-none overflow-y-auto"
+          className="min-h-0 resize-none overflow-hidden py-2 leading-5"
           rows={1}
           disabled={disabled}
         />
         {isLoading ? (
-          <Button variant="destructive" size="icon" onClick={onStop}>
+          <Button variant="destructive" size="icon" onClick={onStop} className="shrink-0">
             <Square className="h-4 w-4" />
           </Button>
         ) : (
@@ -179,6 +177,7 @@ export function MessageInput({
             size="icon"
             onClick={handleSubmit}
             disabled={!content.trim() || disabled}
+            className="shrink-0"
           >
             <Send className="h-4 w-4" />
           </Button>

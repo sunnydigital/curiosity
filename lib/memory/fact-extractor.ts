@@ -1,5 +1,5 @@
 import { getSettings } from "@/db/queries/settings";
-import { getProvider } from "@/lib/llm/provider-registry";
+import { getProviderAsync } from "@/lib/llm/provider-registry";
 import { FACT_EXTRACTION_PROMPT } from "@/lib/constants";
 
 export async function extractFacts(
@@ -9,7 +9,7 @@ export async function extractFacts(
   const settings = getSettings();
 
   // Use the preview provider for fact extraction (cheaper/faster)
-  const provider = getProvider(settings.previewProvider, settings);
+  const provider = await getProviderAsync(settings.previewProvider, settings);
 
   try {
     const response = await provider.complete({

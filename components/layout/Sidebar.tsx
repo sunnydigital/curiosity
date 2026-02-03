@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { LightbulbIcon } from "@/components/layout/LightbulbIcon";
+import { TelescopeIcon } from "@/components/layout/TelescopeIcon";
 import type { Chat, Project } from "@/types";
 
 const DEFAULT_PROJECT_PRESETS = [
@@ -331,7 +331,7 @@ export function Sidebar() {
       </div>
 
       {/* Action buttons */}
-      <div className="ml-1 flex shrink-0 items-center gap-0.5">
+      <div className="ml-1 flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100">
         <button
           className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           onClick={(e) => {
@@ -357,82 +357,82 @@ export function Sidebar() {
   // Shared project modal (rendered via portal so it works in both states)
   const projectModal = showProjectDialog
     ? createPortal(
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+        onClick={() => setShowProjectDialog(false)}
+      >
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          onClick={() => setShowProjectDialog(false)}
+          className="mx-4 w-full max-w-xl rounded-lg border border-border bg-background p-6 shadow-lg"
+          onClick={(e) => e.stopPropagation()}
         >
-          <div
-            className="mx-4 w-full max-w-xl rounded-lg border border-border bg-background p-6 shadow-lg"
-            onClick={(e) => e.stopPropagation()}
+          <h3 className="text-lg font-semibold text-foreground">Create Project</h3>
+          <form
+            className="mt-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleCreateProject();
+            }}
           >
-            <h3 className="text-lg font-semibold text-foreground">Create Project</h3>
-            <form
-              className="mt-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleCreateProject();
-              }}
-            >
-              <Input
-                value={newProjectTitle}
-                onChange={(e) => setNewProjectTitle(e.target.value)}
-                placeholder="Project name..."
-                autoFocus
-              />
-              <div className="mt-3 flex flex-wrap gap-2">
-                {DEFAULT_PROJECT_PRESETS.map((preset) => (
-                  <button
-                    key={preset.title}
-                    type="button"
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium transition-colors hover:bg-accent",
-                      newProjectTitle === preset.title &&
-                        "border-primary bg-primary/10 text-primary"
-                    )}
-                    onClick={() => setNewProjectTitle(preset.title)}
-                  >
-                    <ProjectIcon icon={preset.icon} className="h-3.5 w-3.5" />
-                    {preset.title}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-5 flex justify-end gap-2">
-                <Button
+            <Input
+              value={newProjectTitle}
+              onChange={(e) => setNewProjectTitle(e.target.value)}
+              placeholder="Project name..."
+              autoFocus
+            />
+            <div className="mt-3 flex flex-wrap gap-2">
+              {DEFAULT_PROJECT_PRESETS.map((preset) => (
+                <button
+                  key={preset.title}
                   type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setShowProjectDialog(false);
-                    setNewProjectTitle("");
-                  }}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium transition-colors hover:bg-accent",
+                    newProjectTitle === preset.title &&
+                    "border-primary bg-primary/10 text-primary"
+                  )}
+                  onClick={() => setNewProjectTitle(preset.title)}
                 >
-                  Cancel
-                </Button>
-                <Button type="submit" size="sm" disabled={!newProjectTitle.trim()}>
-                  Create
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>,
-        document.body
-      )
+                  <ProjectIcon icon={preset.icon} className="h-3.5 w-3.5" />
+                  {preset.title}
+                </button>
+              ))}
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShowProjectDialog(false);
+                  setNewProjectTitle("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={!newProjectTitle.trim()}>
+                Create
+              </Button>
+            </div>
+          </form>
+        </div>
+      </div>,
+      document.body
+    )
     : null;
 
   // ─── Collapsed state ───
   if (collapsed) {
     return (
       <>
-        <div className="flex w-12 flex-col items-center border-r border-border bg-background py-4">
+        <div className="flex w-12 flex-col items-center border-r border-border bg-background">
           <button
-            className="mb-4 flex items-center justify-center"
+            className="flex h-12 items-center justify-center"
             onClick={() => setCollapsed(false)}
             onMouseEnter={() => setBulbHovered(true)}
             onMouseLeave={() => setBulbHovered(false)}
           >
-            <LightbulbIcon hovered={bulbHovered} className="h-8 w-8" />
+            <TelescopeIcon hovered={bulbHovered} className="h-6 w-6" />
           </button>
-          <Button variant="ghost" size="icon" onClick={handleNewChat}>
+          <Button variant="ghost" size="icon" onClick={handleNewChat} className="mt-2">
             <Plus className="h-5 w-5" />
           </Button>
           <Button
@@ -454,7 +454,7 @@ export function Sidebar() {
   return (
     <div className="relative flex w-96 flex-col border-r border-border bg-background transition-[width] duration-200">
       {/* Header */}
-      <div className="flex items-center justify-between p-4">
+      <div className="flex h-12 items-center justify-between px-4">
         <h2
           className="cursor-pointer text-lg font-semibold hover:text-primary"
           onClick={handleNewChat}

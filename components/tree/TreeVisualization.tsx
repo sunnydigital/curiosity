@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useCallback, useEffect } from "react";
+import { useMemo, useCallback, useEffect, useRef } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -23,13 +23,23 @@ import type { Message } from "@/types";
 const nodeTypes = { chatNode: TreeNodeMemo };
 const edgeTypes = { chatEdge: TreeEdgeMemo };
 
-/** Re-fits the viewport whenever the node count changes */
+/** Re-fits the viewport whenever the node count stabilises.
+ *  Debounced so rapid node additions during streaming don't
+ *  cause the viewport to jump around or hide existing nodes. */
 function FitViewOnChange({ nodeCount }: { nodeCount: number }) {
   const { fitView } = useReactFlow();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    requestAnimationFrame(() => {
-      fitView({ duration: 200 });
-    });
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      requestAnimationFrame(() => {
+        fitView({ duration: 300 });
+      });
+    }, 150);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
   }, [nodeCount, fitView]);
   return null;
 }

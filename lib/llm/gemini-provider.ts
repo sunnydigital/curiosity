@@ -20,7 +20,16 @@ export class GeminiProvider extends BaseLLMProvider {
     super();
     if (useBearer) {
       this.apiKey = "";
-      this.accessToken = credential;
+      // pi-ai's getApiKey() may return a JSON string like {"token":"...","projectId":"..."}
+      // Extract the actual access token for Bearer auth
+      let token = credential;
+      try {
+        const parsed = JSON.parse(credential);
+        if (parsed.token) token = parsed.token;
+      } catch {
+        // Not JSON — use credential as-is (plain access token)
+      }
+      this.accessToken = token;
       this.client = null; // SDK doesn't support Bearer; use REST
     } else {
       this.apiKey = credential;
@@ -42,6 +51,13 @@ export class GeminiProvider extends BaseLLMProvider {
     const systemMessages = messages.filter((m) => m.role === "system");
     if (systemMessages.length === 0) return undefined;
     return systemMessages.map((m) => m.content).join("\n\n");
+  }
+
+  /** Wrap a system instruction string into the Content format required by both the SDK and REST API. */
+  private buildSystemInstructionContent(messages: LLMCompletionRequest["messages"]): { role: string; parts: { text: string }[] } | undefined {
+    const text = this.buildSystemInstruction(messages);
+    if (!text) return undefined;
+    return { role: "user", parts: [{ text }] };
   }
 
   /**
@@ -84,7 +100,7 @@ export class GeminiProvider extends BaseLLMProvider {
   }
 
   private buildRestBody(req: LLMCompletionRequest) {
-    const systemInstruction = this.buildSystemInstruction(req.messages);
+    const systemInstructionContent = this.buildSystemInstructionContent(req.messages);
     const nonSystemMessages = req.messages.filter((m) => m.role !== "system");
 
     const contents = this.mergeConsecutiveRoles(
@@ -96,8 +112,8 @@ export class GeminiProvider extends BaseLLMProvider {
 
     return {
       contents,
-      ...(systemInstruction
-        ? { systemInstruction: { parts: [{ text: systemInstruction }] } }
+      ...(systemInstructionContent
+        ? { system_instruction: systemInstructionContent }
         : {}),
       generationConfig: {
         temperature: req.temperature ?? 0.7,
@@ -128,8 +144,11 @@ export class GeminiProvider extends BaseLLMProvider {
   // ── SDK-based methods (API key auth) ──
 
   private async completeSdk(req: LLMCompletionRequest): Promise<LLMCompletionResponse> {
-    const model = this.client!.getGenerativeModel({ model: req.model });
-    const systemInstruction = this.buildSystemInstruction(req.messages);
+    const systemInstructionContent = this.buildSystemInstructionContent(req.messages);
+    const model = this.client!.getGenerativeModel({
+      model: req.model,
+      ...(systemInstructionContent ? { systemInstruction: systemInstructionContent } : {}),
+    });
     const nonSystemMessages = req.messages.filter((m) => m.role !== "system");
 
     const rawHistory = nonSystemMessages.slice(0, -1).map((m) => ({
@@ -138,10 +157,7 @@ export class GeminiProvider extends BaseLLMProvider {
     }));
     const history = this.mergeConsecutiveRoles(rawHistory);
 
-    const chat = model.startChat({
-      history,
-      ...(systemInstruction ? { systemInstruction } : {}),
-    });
+    const chat = model.startChat({ history });
 
     const lastMessage = nonSystemMessages[nonSystemMessages.length - 1];
     const result = await chat.sendMessage(this.buildParts(lastMessage));
@@ -157,8 +173,11 @@ export class GeminiProvider extends BaseLLMProvider {
   private async *streamSdk(
     req: LLMCompletionRequest
   ): AsyncGenerator<LLMStreamChunk, void, unknown> {
-    const model = this.client!.getGenerativeModel({ model: req.model });
-    const systemInstruction = this.buildSystemInstruction(req.messages);
+    const systemInstructionContent = this.buildSystemInstructionContent(req.messages);
+    const model = this.client!.getGenerativeModel({
+      model: req.model,
+      ...(systemInstructionContent ? { systemInstruction: systemInstructionContent } : {}),
+    });
     const nonSystemMessages = req.messages.filter((m) => m.role !== "system");
 
     const rawHistory = nonSystemMessages.slice(0, -1).map((m) => ({
@@ -167,10 +186,7 @@ export class GeminiProvider extends BaseLLMProvider {
     }));
     const history = this.mergeConsecutiveRoles(rawHistory);
 
-    const chat = model.startChat({
-      history,
-      ...(systemInstruction ? { systemInstruction } : {}),
-    });
+    const chat = model.startChat({ history });
 
     const lastMessage = nonSystemMessages[nonSystemMessages.length - 1];
     const result = await chat.sendMessageStream(this.buildParts(lastMessage));
