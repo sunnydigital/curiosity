@@ -27,6 +27,7 @@ export class OllamaProvider extends BaseLLMProvider {
   }
 
   async complete(req: LLMCompletionRequest): Promise<LLMCompletionResponse> {
+    console.log(`[OllamaProvider] complete() called with model: ${req.model}, baseUrl: ${this.baseUrl}`);
     const response = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -41,22 +42,27 @@ export class OllamaProvider extends BaseLLMProvider {
       }),
     });
 
+    console.log(`[OllamaProvider] Response status: ${response.status} ${response.statusText}`);
+
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[OllamaProvider] Error response:`, errorText);
       throw new Error(`Ollama error: ${response.statusText}`);
     }
 
     const data = await response.json();
+    console.log(`[OllamaProvider] Success, model used: ${data.model}`);
     return {
       content: data.message?.content || "",
       model: data.model,
       provider: "ollama",
       usage: data.eval_count
         ? {
-            promptTokens: data.prompt_eval_count || 0,
-            completionTokens: data.eval_count || 0,
-            totalTokens:
-              (data.prompt_eval_count || 0) + (data.eval_count || 0),
-          }
+          promptTokens: data.prompt_eval_count || 0,
+          completionTokens: data.eval_count || 0,
+          totalTokens:
+            (data.prompt_eval_count || 0) + (data.eval_count || 0),
+        }
         : undefined,
     };
   }
@@ -64,6 +70,7 @@ export class OllamaProvider extends BaseLLMProvider {
   async *stream(
     req: LLMCompletionRequest
   ): AsyncGenerator<LLMStreamChunk, void, unknown> {
+    console.log(`[OllamaProvider] stream() called with model: ${req.model}, baseUrl: ${this.baseUrl}`);
     const response = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -78,6 +85,15 @@ export class OllamaProvider extends BaseLLMProvider {
       }),
     });
 
+    console.log(`[OllamaProvider] Response status: ${response.status} ${response.statusText}`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[OllamaProvider] Error response:`, errorText);
+      throw new Error(`Ollama error: ${response.statusText}`);
+    }
+
+    console.log(`[OllamaProvider] Starting stream parsing`);
     if (!response.ok) {
       throw new Error(`Ollama error: ${response.statusText}`);
     }

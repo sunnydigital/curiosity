@@ -1,10 +1,46 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { Message, FailoverEvent } from "@/types";
+import type { Message, FailoverEvent, LLMProviderName } from "@/types";
 
 interface UseChatOptions {
   chatId: string;
+}
+
+// Helper function to handle failback model changes
+async function handleFailbackModelChange(actualProvider: LLMProviderName, actualModel: string) {
+  try {
+    const response = await fetch("/api/settings");
+    const currentSettings = await response.json();
+
+    const hasChanged =
+      currentSettings.activeProvider !== actualProvider ||
+      currentSettings.activeModel !== actualModel;
+
+    if (hasChanged) {
+      // Persist the failback model to settings
+      await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          activeProvider: actualProvider,
+          activeModel: actualModel
+        }),
+      });
+
+      // Notify TopBar and ChatView to update their UI
+      window.dispatchEvent(
+        new CustomEvent("provider-switched", {
+          detail: {
+            provider: actualProvider,
+            model: actualModel
+          }
+        })
+      );
+    }
+  } catch {
+    // Best effort - ignore errors
+  }
 }
 
 export function useChat({ chatId }: UseChatOptions) {
@@ -139,6 +175,14 @@ export function useChat({ chatId }: UseChatOptions) {
                 setMessages((prev) => [...prev, event.message]);
                 setStreamingContent("");
                 streamingContentRef.current = "";
+                // Handle failback model changes
+                if (event.actualProvider && event.actualModel) {
+                  handleFailbackModelChange(event.actualProvider, event.actualModel);
+                }
+                // Handle failback model changes
+                if (event.actualProvider && event.actualModel) {
+                  handleFailbackModelChange(event.actualProvider, event.actualModel);
+                }
               } else if (event.type === "title_updated") {
                 window.dispatchEvent(new CustomEvent("refresh-sidebar"));
               } else if (event.type === "failover") {
@@ -312,6 +356,10 @@ export function useChat({ chatId }: UseChatOptions) {
                 setMessages((prev) => [...prev, event.message]);
                 setStreamingContent("");
                 streamingContentRef.current = "";
+                // Handle failback model changes
+                if (event.actualProvider && event.actualModel) {
+                  handleFailbackModelChange(event.actualProvider, event.actualModel);
+                }
               } else if (event.type === "failover") {
                 setFailoverNotice(event as FailoverEvent);
                 setTimeout(() => setFailoverNotice(null), 8000);

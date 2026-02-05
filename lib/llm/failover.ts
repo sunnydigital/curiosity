@@ -33,6 +33,12 @@ export function classifyError(
   const statusCode = err?.status ?? err?.statusCode ?? err?.response?.status;
   const message = err?.message || String(error);
 
+  console.log(`[Failover] Classifying error for ${provider}:`, {
+    statusCode,
+    message: message.substring(0, 200),
+    errorKeys: Object.keys(err || {})
+  });
+
   if (statusCode === 429) {
     return {
       provider,
@@ -100,6 +106,8 @@ export class FailoverExecutor {
     this._actualProvider = this.settings.activeProvider;
     this._actualModel = this.settings.activeModel;
 
+    console.log(`[Failover] Initializing for active provider: ${this.settings.activeProvider}`);
+
     // Build deduplicated chain: active provider first, then explicit failover
     // chain, then any remaining providers that have credentials configured
     const seen = new Set<LLMProviderName>();
@@ -109,6 +117,7 @@ export class FailoverExecutor {
       if (!seen.has(p)) {
         seen.add(p);
         this.chain.push(p);
+        console.log(`[Failover] Added ${p} to chain`);
       }
     };
 
@@ -123,6 +132,10 @@ export class FailoverExecutor {
     for (const p of allProviders) {
       if (seen.has(p)) continue;
 
+      // Check auth mode for OAuth
+      const authModeKey = `${p}AuthMode` as keyof Settings;
+      const authMode = (this.settings[authModeKey] as any) || "api_key";
+
       // Check if the provider has credentials available
       const hasApiKey =
         (p === "openai" && this.settings.openaiApiKey) ||
@@ -132,6 +145,8 @@ export class FailoverExecutor {
       // Check if the provider has OAuth tokens in the database
       const hasOAuthTokens = getOAuthTokens(p) !== null;
 
+      console.log(`[Failover] Checking ${p}: authMode=${authMode}, hasApiKey=${hasApiKey}, hasOAuthTokens=${hasOAuthTokens}`);
+
       if (p === "ollama" && this.settings.ollamaBaseUrl) {
         addIfNew(p);
       } else if (hasApiKey || hasOAuthTokens) {
@@ -139,6 +154,7 @@ export class FailoverExecutor {
       }
     }
 
+    console.log(`[Failover] Final chain: ${this.chain.join(" -> ")}`);
   }
 
   get actualProvider(): LLMProviderName {
@@ -159,29 +175,38 @@ export class FailoverExecutor {
           ? req.model
           : resolveEquivalentModel(req.model, providerName);
 
+      console.log(`[Failover] Attempting provider ${i + 1}/${this.chain.length}: ${providerName} with model ${model}`);
+
       try {
         const provider = await getProviderAsync(providerName, this.settings);
+        console.log(`[Failover] Provider ${providerName} initialized successfully`);
         const gen = provider.stream({ ...req, model });
 
         for await (const chunk of gen) {
           yield chunk;
         }
 
+        console.log(`[Failover] Success with ${providerName} using model ${model}`);
         this._actualProvider = providerName;
         this._actualModel = model;
         return;
       } catch (error) {
         const classified = classifyError(error, providerName);
+        console.error(`[Failover] Error with ${providerName}:`, classified.message);
+        console.error(`[Failover] Error type: ${classified.errorType}, retryable: ${classified.retryable}`);
 
         if (i === this.chain.length - 1) {
+          console.error(`[Failover] All providers exhausted. Throwing error.`);
           throw error;
         }
 
         if (!classified.retryable && classified.errorType === "auth") {
           // Auth errors are not retryable on the same provider,
           // but we can still try the next provider in the chain
+          console.log(`[Failover] Auth error, moving to next provider`);
         }
 
+        console.log(`[Failover] Switching from ${providerName} to ${this.chain[i + 1]}`);
         this.onFailover?.({
           type: "failover",
           fromProvider: providerName,

@@ -59,6 +59,17 @@ const FALLBACK_MODEL_OPTIONS: Record<LLMProviderName, string[]> = {
   ollama: [],
 };
 
+// Models available via Google Antigravity (Claude, Gemini, and GPT models)
+const ANTIGRAVITY_MODELS = [
+  "claude-opus-4-5-thinking",
+  "claude-sonnet-4-5",
+  "claude-sonnet-4-5-thinking",
+  "gemini-3-flash",
+  "gemini-3-pro-high",
+  "gemini-3-pro-low",
+  "gpt-oss-120b-medium",
+];
+
 const PROVIDER_COLORS: Record<string, string> = {
   openai: "#10a37f",
   anthropic: "#d97757",
@@ -385,9 +396,29 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!settings || modelsFetchedRef.current) return;
     modelsFetchedRef.current = true;
+
     const cloudProviders: LLMProviderName[] = ["openai", "anthropic", "gemini"];
     for (const provider of cloudProviders) {
       setModelsLoading((prev) => ({ ...prev, [provider]: true }));
+
+      // Special handling for Gemini with Antigravity OAuth
+      if (provider === "gemini" && settings.geminiAuthMode === "oauth_antigravity") {
+        // Fetch Claude models from Antigravity endpoint
+        fetch("/api/models/antigravity")
+          .then((r) => r.json())
+          .then((data) => {
+            const raw = data.models || [];
+            const models: string[] = raw.map((m: any) => (typeof m === "string" ? m : m.id));
+            if (models.length > 0) {
+              setDynamicModels((prev) => ({ ...prev, gemini: models }));
+            }
+          })
+          .catch(() => { })
+          .finally(() => setModelsLoading((prev) => ({ ...prev, gemini: false })));
+        continue;
+      }
+
+      // Standard model fetching for other providers
       fetch(`/api/models/${provider}`)
         .then((r) => r.json())
         .then((data) => {
@@ -484,6 +515,10 @@ export default function SettingsPage() {
 
   // Compute the model list for the current provider
   const activeProvider = settings?.activeProvider || "openai";
+
+  // Special handling for Gemini with Antigravity OAuth - show Claude models
+  const isGeminiAntigravity = activeProvider === "gemini" && settings?.geminiAuthMode === "oauth_antigravity";
+
   const modelOptions =
     activeProvider === "ollama"
       ? ollamaModels.length > 0
@@ -491,7 +526,22 @@ export default function SettingsPage() {
         : settings?.activeModel
           ? [settings.activeModel]
           : ["llama3.2"]
-      : dynamicModels[activeProvider] || FALLBACK_MODEL_OPTIONS[activeProvider];
+      : isGeminiAntigravity
+        ? (dynamicModels[activeProvider]?.length > 0 ? dynamicModels[activeProvider] : ANTIGRAVITY_MODELS)
+        : dynamicModels[activeProvider] || FALLBACK_MODEL_OPTIONS[activeProvider];
+
+  // Helper to get model options for any provider (for default/preview dropdowns)
+  const getModelOptionsForProvider = (provider: LLMProviderName) => {
+    if (provider === "ollama") {
+      return ollamaModels.length > 0 ? ollamaModels : ["llama3.2"];
+    }
+    // Check if Gemini is using Antigravity mode
+    const isProviderAntigravity = provider === "gemini" && settings?.geminiAuthMode === "oauth_antigravity";
+    if (isProviderAntigravity) {
+      return dynamicModels[provider]?.length > 0 ? dynamicModels[provider] : ANTIGRAVITY_MODELS;
+    }
+    return dynamicModels[provider] || FALLBACK_MODEL_OPTIONS[provider];
+  };
 
   if (!settings) {
     return (
@@ -614,9 +664,7 @@ export default function SettingsPage() {
             {(["openai", "anthropic", "gemini", "ollama"] as LLMProviderName[]).map((provider) => {
               const settingsKey = `default${provider.charAt(0).toUpperCase() + provider.slice(1)}Model` as keyof Settings;
               const currentValue = (settings as any)[settingsKey] as string;
-              const options = provider === "ollama"
-                ? (ollamaModels.length > 0 ? ollamaModels : [currentValue || "llama3.2"])
-                : (dynamicModels[provider] || FALLBACK_MODEL_OPTIONS[provider]);
+              const options = getModelOptionsForProvider(provider);
               return (
                 <div key={provider} className="flex items-center gap-2">
                   <ProviderIcon provider={provider} active={!!defaultModelFocus[provider]} />
@@ -665,9 +713,7 @@ export default function SettingsPage() {
               {(["openai", "anthropic", "gemini", "ollama"] as LLMProviderName[]).map((provider) => {
                 const settingsKey = `preview${provider.charAt(0).toUpperCase() + provider.slice(1)}Model` as keyof Settings;
                 const currentValue = (settings as any)[settingsKey] as string;
-                const options = provider === "ollama"
-                  ? (ollamaModels.length > 0 ? ollamaModels : [currentValue || "llama3.2"])
-                  : (dynamicModels[provider] || FALLBACK_MODEL_OPTIONS[provider]);
+                const options = getModelOptionsForProvider(provider);
                 const isActivePreview = provider === settings.previewProvider;
                 return (
                   <div key={provider} className="flex items-center gap-2">
@@ -789,11 +835,9 @@ export default function SettingsPage() {
                             reorderFailoverChain(fromIndex, toIndex);
                             setDraggedProvider(null);
                           }}
-                          className={`flex items-center justify-between rounded px-2 py-1.5 text-sm transition-colors ${
-                            isInChain ? "bg-accent" : ""
-                          } ${isInChain ? "cursor-grab active:cursor-grabbing" : ""} ${
-                            draggedProvider && isInChain && draggedProvider !== p.name ? "border border-dashed border-primary/40" : ""
-                          }`}
+                          className={`flex items-center justify-between rounded px-2 py-1.5 text-sm transition-colors ${isInChain ? "bg-accent" : ""
+                            } ${isInChain ? "cursor-grab active:cursor-grabbing" : ""} ${draggedProvider && isInChain && draggedProvider !== p.name ? "border border-dashed border-primary/40" : ""
+                            }`}
                         >
                           <div className="flex items-center gap-2">
                             {isInChain && (
@@ -942,13 +986,64 @@ export default function SettingsPage() {
                               ? "bg-primary text-primary-foreground"
                               : "hover:bg-accent"
                               }`}
-                            onClick={() => {
+                            onClick={async () => {
                               const key = `${p.name}AuthMode` as keyof Settings;
                               setSettings({ ...settings, [key]: mode });
-                              persistSettings({ [key]: mode });
+                              await persistSettings({ [key]: mode });
                               // Reset pending state when switching modes
                               setOauthPending((prev) => ({ ...prev, [p.name]: false }));
                               setOauthCode("");
+
+                              // Refetch models when switching Gemini auth modes
+                              if (p.name === "gemini") {
+                                modelsFetchedRef.current = false; // Allow refetch
+                                setModelsLoading((prev) => ({ ...prev, gemini: true }));
+
+                                if (mode === "oauth_antigravity") {
+                                  // Fetch Antigravity models (Claude, Gemini-3, GPT)
+                                  fetch("/api/models/antigravity")
+                                    .then((r) => r.json())
+                                    .then((data) => {
+                                      const raw = data.models || [];
+                                      const models: string[] = raw.map((m: any) => (typeof m === "string" ? m : m.id));
+                                      if (models.length > 0) {
+                                        setDynamicModels((prev) => ({ ...prev, gemini: models }));
+                                        // Auto-select first Antigravity model if current model is not in the list
+                                        // or if it's a standard Gemini model (gemini-2.x, gemini-1.x)
+                                        const isStandardGeminiModel = /^gemini-[12]\./.test(settings.activeModel);
+                                        if (!models.includes(settings.activeModel) || isStandardGeminiModel) {
+                                          const newModel = models[0] || "claude-opus-4-5-thinking";
+                                          setSettings((prev) => prev ? { ...prev, activeModel: newModel } : prev);
+                                          persistSettings({ activeModel: newModel });
+                                        }
+                                      }
+                                    })
+                                    .catch(() => { })
+                                    .finally(() => setModelsLoading((prev) => ({ ...prev, gemini: false })));
+                                } else {
+                                  // Fetch standard Gemini models
+                                  fetch("/api/models/gemini")
+                                    .then((r) => r.json())
+                                    .then((data) => {
+                                      const raw = data.models || [];
+                                      const models: string[] = raw.map((m: any) => (typeof m === "string" ? m : m.id));
+                                      if (models.length > 0) {
+                                        setDynamicModels((prev) => ({ ...prev, gemini: models }));
+                                        // Auto-select first Gemini model if current model is not a standard Gemini model
+                                        const isAntigravityModel = settings.activeModel.startsWith("claude") ||
+                                          settings.activeModel.startsWith("gemini-3") ||
+                                          settings.activeModel.startsWith("gpt-oss");
+                                        if (isAntigravityModel || !models.includes(settings.activeModel)) {
+                                          const newModel = models[0] || "gemini-2.5-flash";
+                                          setSettings((prev) => prev ? { ...prev, activeModel: newModel } : prev);
+                                          persistSettings({ activeModel: newModel });
+                                        }
+                                      }
+                                    })
+                                    .catch(() => { })
+                                    .finally(() => setModelsLoading((prev) => ({ ...prev, gemini: false })));
+                                }
+                              }
                             }}
                           >
                             {label}
@@ -1010,18 +1105,18 @@ export default function SettingsPage() {
                         anthropic: { url: "https://console.anthropic.com/settings/keys", label: "console.anthropic.com" },
                         gemini: { url: "https://aistudio.google.com/apikey", label: "aistudio.google.com" },
                       } as Record<string, { url: string; label: string }>)[p.name] && (
-                        <div className="mt-1.5 text-xs text-muted-foreground">
-                          Get your API key at{" "}
-                          <a
-                            href={({ openai: "https://platform.openai.com/api-keys", anthropic: "https://console.anthropic.com/settings/keys", gemini: "https://aistudio.google.com/apikey" } as Record<string, string>)[p.name]}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="underline hover:text-foreground"
-                          >
-                            {({ openai: "platform.openai.com", anthropic: "console.anthropic.com", gemini: "aistudio.google.com" } as Record<string, string>)[p.name]}
-                          </a>
-                        </div>
-                      )}
+                          <div className="mt-1.5 text-xs text-muted-foreground">
+                            Get your API key at{" "}
+                            <a
+                              href={({ openai: "https://platform.openai.com/api-keys", anthropic: "https://console.anthropic.com/settings/keys", gemini: "https://aistudio.google.com/apikey" } as Record<string, string>)[p.name]}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline hover:text-foreground"
+                            >
+                              {({ openai: "platform.openai.com", anthropic: "console.anthropic.com", gemini: "aistudio.google.com" } as Record<string, string>)[p.name]}
+                            </a>
+                          </div>
+                        )}
                     </div>
                   ) : providerOAuth?.connected ? (
                     <div className="flex items-center justify-between">
@@ -1493,9 +1588,8 @@ export default function SettingsPage() {
 
       {/* Floating save toast */}
       <div
-        className={`fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-md border bg-popover px-3 py-2 text-sm shadow-lg transition-all duration-300 ${
-          saved ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0 pointer-events-none"
-        }`}
+        className={`fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-md border bg-popover px-3 py-2 text-sm shadow-lg transition-all duration-300 ${saved ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0 pointer-events-none"
+          }`}
       >
         <Check className="h-4 w-4 text-green-500" />
         Settings saved

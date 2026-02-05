@@ -46,6 +46,24 @@ const GEMINI_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
 ];
+
+// ── Google Antigravity (Cloud Code Assist) provider ──
+//
+// Antigravity uses different OAuth client credentials from openclaw and provides
+// access to non-Google models (like Claude) through Google Cloud infrastructure.
+// This requires the full cloud-platform scope and proper project discovery.
+
+const ANTIGRAVITY_CLIENT_ID = atob("MTA3MTAwNjA2MDU5MS10bWhzc2luMmgyMWxjcmUyMzV2dG9sb2poNGc0MDNlcC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbQ==");
+const ANTIGRAVITY_CLIENT_SECRET = atob("R09DU1BYLUs1OEZXUjQ4NkxkTEoxbUxCOHNYQzR6NnFEQWY=");
+const ANTIGRAVITY_REDIRECT_URI = "http://localhost:51121/oauth-callback";
+const ANTIGRAVITY_SCOPES = [
+  "https://www.googleapis.com/auth/cloud-platform",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+  "https://www.googleapis.com/auth/cclog",
+  "https://www.googleapis.com/auth/experimentsandconfigs",
+];
+
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
@@ -98,6 +116,55 @@ async function startGeminiCallbackServer(): Promise<{
     });
     server.on("error", reject);
     server.listen(8085, "127.0.0.1", () => {
+      resolve({
+        server,
+        cancelWait: () => { cancelled = true; },
+        waitForCode: async () => {
+          while (!result && !cancelled) {
+            await new Promise((r) => setTimeout(r, 100));
+          }
+          return result;
+        },
+      });
+    });
+  });
+}
+
+async function startAntigravityCallbackServer(): Promise<{
+  server: import("http").Server;
+  cancelWait: () => void;
+  waitForCode: () => Promise<{ code: string; state: string } | null>;
+}> {
+  const http = await import("http");
+  return new Promise((resolve, reject) => {
+    let result: { code: string; state: string } | null = null;
+    let cancelled = false;
+    const server = http.createServer((req, res) => {
+      const url = new URL(req.url || "", "http://localhost:51121");
+      if (url.pathname === "/oauth-callback") {
+        const code = url.searchParams.get("code");
+        const state = url.searchParams.get("state");
+        const error = url.searchParams.get("error");
+        if (error) {
+          res.writeHead(400, { "Content-Type": "text/html" });
+          res.end(`<html><body><h1>Authentication Failed</h1><p>${error}</p></body></html>`);
+          return;
+        }
+        if (code && state) {
+          res.writeHead(200, { "Content-Type": "text/html" });
+          res.end(`<html><body><h1>Authentication Successful</h1><p>You can close this window and return to your app.</p></body></html>`);
+          result = { code, state };
+        } else {
+          res.writeHead(400, { "Content-Type": "text/html" });
+          res.end(`<html><body><h1>Authentication Failed</h1><p>Missing code or state.</p></body></html>`);
+        }
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    server.on("error", reject);
+    server.listen(51121, "127.0.0.1", () => {
       resolve({
         server,
         cancelWait: () => { cancelled = true; },
@@ -201,12 +268,204 @@ async function loginGeminiCliSimple(
       throw new Error("No refresh token received. Please try again.");
     }
 
+    onProgress?.("Discovering Google Cloud project...");
+    const projectId = await discoverProjectId(tokenData.access_token);
+
     onProgress?.("Connected successfully.");
     return {
       refresh: tokenData.refresh_token,
       access: tokenData.access_token,
       expires: Date.now() + tokenData.expires_in * 1000 - 5 * 60 * 1000,
+      projectId,
+    } as OAuthCredentials & { projectId: string };
+  } finally {
+    callbackServer.server.close();
+  }
+}
+
+/** 
+ * Discover the Google Cloud project ID for Code Assist API access.
+ * Uses a default fallback project if discovery fails, as the cloud-platform scope
+ * only works with the Cloud Code Assist endpoint (not the public API).
+ */
+async function discoverProjectId(accessToken: string, defaultProject?: string): Promise<string> {
+  // Default fallback project (used by openclaw for accounts without projects)
+  const DEFAULT_PROJECT = defaultProject || "curiositylm-gemini-default";
+
+  // Check environment variable first
+  const envProject = process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT_ID;
+  if (envProject) {
+    console.log(`[OAuth] Using GOOGLE_CLOUD_PROJECT: ${envProject}`);
+    return envProject;
+  }
+
+  const CODE_ASSIST_ENDPOINT = "https://cloudcode-pa.googleapis.com";
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+    "User-Agent": "google-api-nodejs-client/9.15.1",
+    "X-Goog-Api-Client": "gl-node/curiosityLM",
+  };
+
+  const loadBody = {
+    metadata: {
+      ideType: "IDE_UNSPECIFIED",
+      platform: "PLATFORM_UNSPECIFIED",
+      pluginType: "GEMINI",
+    },
+  };
+
+  try {
+    console.log(`[OAuth] Calling ${CODE_ASSIST_ENDPOINT}/v1internal:loadCodeAssist to discover project...`);
+    const response = await fetch(`${CODE_ASSIST_ENDPOINT}/v1internal:loadCodeAssist`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(loadBody),
+    });
+
+    console.log(`[OAuth] loadCodeAssist response status: ${response.status}`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn(`[OAuth] Cloud Code Assist API returned ${response.status}: ${errorText}`);
+      console.warn(`[OAuth] Using default project: ${DEFAULT_PROJECT}`);
+      return DEFAULT_PROJECT;
+    }
+
+    const data = (await response.json()) as {
+      cloudaicompanionProject?: string | { id?: string };
     };
+
+    console.log(`[OAuth] loadCodeAssist response data:`, JSON.stringify(data, null, 2));
+
+    const project = data.cloudaicompanionProject;
+    if (typeof project === "string" && project) {
+      console.log(`[OAuth] Discovered project: ${project}`);
+      return project;
+    }
+    if (typeof project === "object" && project?.id) {
+      console.log(`[OAuth] Discovered project: ${project.id}`);
+      return project.id;
+    }
+
+    console.warn(`[OAuth] No Cloud Code Assist project found, using default project`);
+    return DEFAULT_PROJECT;
+  } catch (error) {
+    console.warn(`[OAuth] Project discovery failed, using default project:`, error);
+    return DEFAULT_PROJECT;
+  }
+}
+
+/**
+ * Google Antigravity OAuth: Uses OpenClaw's client credentials for accessing
+ * non-Google models (Claude, etc.) through Google Cloud Code Assist.
+ * Requires full cloud-platform scope and project discovery.
+ */
+async function loginAntigravity(
+  onAuth: (info: { url: string; instructions?: string }) => void,
+  onProgress?: (message: string) => void,
+  onManualCodeInput?: () => Promise<string>,
+): Promise<OAuthCredentials> {
+  const { verifier, challenge } = await generatePKCE();
+
+  onProgress?.("Starting local server for Antigravity OAuth callback...");
+  const callbackServer = await startAntigravityCallbackServer();
+
+  let code: string | undefined;
+  try {
+    const authParams = new URLSearchParams({
+      client_id: ANTIGRAVITY_CLIENT_ID,
+      response_type: "code",
+      redirect_uri: ANTIGRAVITY_REDIRECT_URI,
+      scope: ANTIGRAVITY_SCOPES.join(" "),
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      state: verifier,
+      access_type: "offline",
+      prompt: "consent",
+    });
+    const authUrl = `${GOOGLE_AUTH_URL}?${authParams.toString()}`;
+    onAuth({ url: authUrl, instructions: "Complete the sign-in in your browser for Google Antigravity access." });
+
+    onProgress?.("Waiting for Antigravity OAuth callback...");
+
+    if (onManualCodeInput) {
+      // Race: local callback server vs manual code input
+      let manualInput: string | undefined;
+      let manualError: Error | undefined;
+      const manualPromise = onManualCodeInput()
+        .then((input) => { manualInput = input; callbackServer.cancelWait(); })
+        .catch((err) => { manualError = err instanceof Error ? err : new Error(String(err)); callbackServer.cancelWait(); });
+
+      const result = await callbackServer.waitForCode();
+      if (manualError) throw manualError;
+      if (result?.code) {
+        if (result.state !== verifier) throw new Error("OAuth state mismatch");
+        code = result.code;
+      } else if (manualInput) {
+        try {
+          const url = new URL(manualInput.trim());
+          code = url.searchParams.get("code") ?? undefined;
+        } catch {
+          code = manualInput.trim();
+        }
+      }
+      if (!code) {
+        await manualPromise;
+        if (manualError) throw manualError;
+      }
+    } else {
+      const result = await callbackServer.waitForCode();
+      if (result?.code) {
+        if (result.state !== verifier) throw new Error("OAuth state mismatch");
+        code = result.code;
+      }
+    }
+
+    if (!code) throw new Error("No authorization code received");
+
+    onProgress?.("Exchanging authorization code for Antigravity tokens...");
+    const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: ANTIGRAVITY_CLIENT_ID,
+        client_secret: ANTIGRAVITY_CLIENT_SECRET,
+        code,
+        grant_type: "authorization_code",
+        redirect_uri: ANTIGRAVITY_REDIRECT_URI,
+        code_verifier: verifier,
+      }),
+    });
+    if (!tokenResponse.ok) {
+      const error = await tokenResponse.text();
+      throw new Error(`Antigravity token exchange failed: ${error}`);
+    }
+    const tokenData = await tokenResponse.json();
+    if (!tokenData.refresh_token) {
+      throw new Error("No refresh token received from Antigravity. Please try again.");
+    }
+
+    onProgress?.("Discovering Google Cloud project for Antigravity...");
+    // Try to discover user's own project first, don't fallback to OpenClaw's project
+    const projectId = await discoverProjectId(tokenData.access_token, undefined);
+
+    console.log(`[OAuth] Using Antigravity project: ${projectId}`);
+
+    // If we couldn't discover a project, the user needs to create one or use a different auth mode
+    if (!projectId || projectId === "curiositylm-gemini-default") {
+      console.warn(`[OAuth] No Cloud Code Assist project found for your Google account.`);
+      console.warn(`[OAuth] You need either:`);
+      console.warn(`[OAuth]   1. A Google Cloud project with Cloud Code Assist API enabled`);
+      console.warn(`[OAuth]   2. Or switch to API Key mode in settings`);
+    }
+    onProgress?.("Antigravity connected successfully.");
+    return {
+      refresh: tokenData.refresh_token,
+      access: tokenData.access_token,
+      expires: Date.now() + tokenData.expires_in * 1000 - 5 * 60 * 1000,
+      projectId,
+    } as OAuthCredentials & { projectId: string };
   } finally {
     callbackServer.server.close();
   }
@@ -226,12 +485,43 @@ registerOAuthProvider({
   },
   async refreshToken(credentials: OAuthCredentials) {
     // Use pi-ai's refresh function — it only hits Google's token endpoint,
-    // no project discovery. Pass empty projectId since we don't use it.
+    // no project discovery. Pass projectId through to preserve it.
     return refreshGoogleCloudToken(credentials.refresh, (credentials as any).projectId || "");
   },
   getApiKey(credentials: OAuthCredentials) {
-    // Return just the access token — no JSON wrapping needed
-    return credentials.access;
+    // Always return JSON with token and projectId for Cloud Code Assist API
+    const projectId = (credentials as any).projectId || "curiositylm-gemini-default";
+    return JSON.stringify({
+      token: credentials.access,
+      projectId,
+    });
+  },
+} satisfies OAuthProviderInterface);
+
+// Register Google Antigravity provider for accessing non-Google models via Cloud Code Assist
+registerOAuthProvider({
+  id: "google-antigravity",
+  name: "Google Antigravity (Cloud Code Assist)",
+  usesCallbackServer: true,
+  async login(callbacks: OAuthLoginCallbacks) {
+    return loginAntigravity(
+      callbacks.onAuth,
+      callbacks.onProgress,
+      callbacks.onManualCodeInput,
+    );
+  },
+  async refreshToken(credentials: OAuthCredentials) {
+    // Use pi-ai's refresh function — it only hits Google's token endpoint,
+    // no project discovery. Pass projectId through to preserve it.
+    return refreshGoogleCloudToken(credentials.refresh, (credentials as any).projectId || "");
+  },
+  getApiKey(credentials: OAuthCredentials) {
+    // Always return JSON with token and projectId for Cloud Code Assist API
+    const projectId = (credentials as any).projectId || "rising-fact-p41fc";
+    return JSON.stringify({
+      token: credentials.access,
+      projectId,
+    });
   },
 } satisfies OAuthProviderInterface);
 
@@ -335,7 +625,7 @@ export function startLogin(providerId: PiOAuthProviderId): PendingLogin {
       // Wait for the user to paste their code
       return codePromise;
     },
-    onProgress: () => {},
+    onProgress: () => { },
     onManualCodeInput: async () => {
       // This races with the local server callback.
       // Our web app always uses this path — user pastes the redirect URL / code.

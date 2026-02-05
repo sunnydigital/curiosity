@@ -126,7 +126,12 @@ export async function POST(
 
         controller.enqueue(
           encoder.encode(
-            `data: ${JSON.stringify({ type: "done", message: assistantMessage })}\n\n`
+            `data: ${JSON.stringify({
+              type: "done",
+              message: assistantMessage,
+              actualProvider,
+              actualModel
+            })}\n\n`
           )
         );
 

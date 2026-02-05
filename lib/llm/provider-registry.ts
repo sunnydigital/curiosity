@@ -35,14 +35,23 @@ async function resolveCredential(
   const authModeKey = `${provider}AuthMode` as keyof Settings;
   const authMode = (settings[authModeKey] as AuthMode) || "api_key";
 
+  console.log(`[Provider] Resolving credential for ${provider}, authMode: ${authMode}`);
+
   if (isPiOAuthMode(authMode)) {
+    console.log(`[Provider] ${provider} is in OAuth mode, attempting to get access token`);
     try {
       const token = await getValidAccessToken(provider);
+      console.log(`[Provider] OAuth token obtained for ${provider}`);
       return { credential: token, isOAuthToken: true };
-    } catch {
+    } catch (error) {
+      console.error(`[Provider] OAuth token fetch failed for ${provider}:`, error);
       // OAuth tokens not available yet; fall back to API key if present
       const apiKey = getApiKey(provider, settings);
-      if (apiKey) return { credential: apiKey, isOAuthToken: false };
+      if (apiKey) {
+        console.log(`[Provider] Falling back to API key for ${provider}`);
+        return { credential: apiKey, isOAuthToken: false };
+      }
+      console.error(`[Provider] No OAuth tokens or API key available for ${provider}`);
       throw new Error(
         `No OAuth tokens found for ${provider} and no API key configured. Please sign in or add an API key.`
       );
@@ -50,8 +59,13 @@ async function resolveCredential(
   }
 
   // API key mode (default)
+  console.log(`[Provider] ${provider} is in API key mode`);
   const apiKey = getApiKey(provider, settings);
-  if (apiKey) return { credential: apiKey, isOAuthToken: false };
+  if (apiKey) {
+    console.log(`[Provider] API key found for ${provider}`);
+    return { credential: apiKey, isOAuthToken: false };
+  }
+  console.error(`[Provider] API key not configured for ${provider}`);
   throw new Error(`${provider} API key not configured`);
 }
 
@@ -115,11 +129,15 @@ export async function getProviderAsync(
   const s = settings || getSettings();
   const name = providerName || s.activeProvider;
 
+  console.log(`[Provider] Getting provider async for: ${name}`);
+
   if (name === "ollama") {
+    console.log(`[Provider] Returning Ollama provider with baseUrl: ${s.ollamaBaseUrl}`);
     return new OllamaProvider(s.ollamaBaseUrl);
   }
 
   const { credential, isOAuthToken } = await resolveCredential(name, s);
+  console.log(`[Provider] Creating ${name} provider, isOAuthToken: ${isOAuthToken}`);
   return createProvider(name, credential, s, isOAuthToken);
 }
 
