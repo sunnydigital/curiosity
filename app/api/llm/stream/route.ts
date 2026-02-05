@@ -23,6 +23,20 @@ export async function POST(request: NextRequest) {
 
   const settings = getSettings();
 
+  console.log(`[Stream API] Settings loaded:`, {
+    activeProvider: settings.activeProvider,
+    activeModel: settings.activeModel,
+    failoverEnabled: settings.failoverEnabled,
+    failoverChain: settings.failoverChain,
+    openaiAuthMode: settings.openaiAuthMode,
+    anthropicAuthMode: settings.anthropicAuthMode,
+    geminiAuthMode: settings.geminiAuthMode,
+    hasOpenAIKey: !!settings.openaiApiKey,
+    hasAnthropicKey: !!settings.anthropicApiKey,
+    hasGeminiKey: !!settings.geminiApiKey,
+    ollamaBaseUrl: settings.ollamaBaseUrl
+  });
+
   const contextMessages = getPathToRoot(userMessage.id);
 
   // Build LLM messages with memory context
@@ -181,7 +195,12 @@ export async function POST(request: NextRequest) {
 
         controller.enqueue(
           encoder.encode(
-            `data: ${JSON.stringify({ type: "done", message: assistantMessage })}\n\n`
+            `data: ${JSON.stringify({
+              type: "done",
+              message: assistantMessage,
+              actualProvider,
+              actualModel
+            })}\n\n`
           )
         );
 

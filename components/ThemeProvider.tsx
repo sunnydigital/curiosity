@@ -18,8 +18,8 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue>({
   theme: "dark",
-  setTheme: () => {},
-  toggleTheme: () => {},
+  setTheme: () => { },
+  toggleTheme: () => { },
 });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -41,6 +41,30 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.classList.add(theme);
     localStorage.setItem("curiosity-theme", theme);
   }, [theme, mounted]);
+
+  // Preload all available models from PI providers on app mount
+  useEffect(() => {
+    const preloadModels = async () => {
+      const providers = ["openai", "anthropic", "gemini"];
+
+      // Fetch models for all PI providers in parallel
+      const fetchPromises = providers.map((provider) =>
+        fetch(`/api/models/${provider}`)
+          .then((r) => r.json())
+          .then((data) => {
+            console.log(`[ThemeProvider] Preloaded ${data.models?.length || 0} models for ${provider}`);
+            return data;
+          })
+          .catch((err) => {
+            console.warn(`[ThemeProvider] Failed to preload models for ${provider}:`, err);
+          })
+      );
+
+      await Promise.all(fetchPromises);
+    };
+
+    preloadModels();
+  }, []);
 
   const setTheme = (t: Theme) => setThemeState(t);
   const toggleTheme = () =>

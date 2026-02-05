@@ -18,18 +18,20 @@ export class AnthropicProvider extends BaseLLMProvider {
   constructor(credential: string, useBearer = false) {
     super();
     this.isOAuthToken = useBearer;
+    console.log(`[AnthropicProvider] Constructor called with useBearer: ${useBearer}`);
     this.client = useBearer
       ? new Anthropic({
-          authToken: credential,
-          apiKey: null,
-          defaultHeaders: {
-            "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,prompt-caching-2024-07-31",
-            "anthropic-dangerous-direct-browser-access": "true",
-            "user-agent": "claude-cli/2.1.2 (external, cli)",
-            "x-app": "cli",
-          },
-        })
+        authToken: credential,
+        apiKey: null,
+        defaultHeaders: {
+          "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,prompt-caching-2024-07-31",
+          "anthropic-dangerous-direct-browser-access": "true",
+          "user-agent": "claude-cli/2.1.2 (external, cli)",
+          "x-app": "cli",
+        },
+      })
       : new Anthropic({ apiKey: credential });
+    console.log(`[AnthropicProvider] Client initialized successfully`);
   }
 
   private formatMessage(m: { role: string; content: string; image?: { base64: string; mimeType: string } }) {
