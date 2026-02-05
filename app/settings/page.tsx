@@ -59,17 +59,6 @@ const FALLBACK_MODEL_OPTIONS: Record<LLMProviderName, string[]> = {
   ollama: [],
 };
 
-// Models available via Google Antigravity (Claude, Gemini, and GPT models)
-const ANTIGRAVITY_MODELS = [
-  "claude-opus-4-5-thinking",
-  "claude-sonnet-4-5",
-  "claude-sonnet-4-5-thinking",
-  "gemini-3-flash",
-  "gemini-3-pro-high",
-  "gemini-3-pro-low",
-  "gpt-oss-120b-medium",
-];
-
 const PROVIDER_COLORS: Record<string, string> = {
   openai: "#10a37f",
   anthropic: "#d97757",
@@ -268,7 +257,7 @@ export default function SettingsPage() {
   }, []);
 
   // Auth modes where pi-ai starts a local callback server that may auto-capture the code
-  const LOCAL_SERVER_AUTH_MODES = useRef(new Set(["oauth_openai_codex", "oauth_gemini_cli", "oauth_antigravity"]));
+  const LOCAL_SERVER_AUTH_MODES = useRef(new Set(["oauth_openai_codex"]));
 
   // Poll for auto-completion when a local-server-based OAuth flow is pending.
   // pi-ai's local callback server (e.g. port 1455 for OpenAI Codex) may capture
@@ -401,24 +390,7 @@ export default function SettingsPage() {
     for (const provider of cloudProviders) {
       setModelsLoading((prev) => ({ ...prev, [provider]: true }));
 
-      // Special handling for Gemini with Antigravity OAuth
-      if (provider === "gemini" && settings.geminiAuthMode === "oauth_antigravity") {
-        // Fetch Claude models from Antigravity endpoint
-        fetch("/api/models/antigravity")
-          .then((r) => r.json())
-          .then((data) => {
-            const raw = data.models || [];
-            const models: string[] = raw.map((m: any) => (typeof m === "string" ? m : m.id));
-            if (models.length > 0) {
-              setDynamicModels((prev) => ({ ...prev, gemini: models }));
-            }
-          })
-          .catch(() => { })
-          .finally(() => setModelsLoading((prev) => ({ ...prev, gemini: false })));
-        continue;
-      }
-
-      // Standard model fetching for other providers
+      // Standard model fetching for all providers
       fetch(`/api/models/${provider}`)
         .then((r) => r.json())
         .then((data) => {
@@ -516,9 +488,6 @@ export default function SettingsPage() {
   // Compute the model list for the current provider
   const activeProvider = settings?.activeProvider || "openai";
 
-  // Special handling for Gemini with Antigravity OAuth - show Claude models
-  const isGeminiAntigravity = activeProvider === "gemini" && settings?.geminiAuthMode === "oauth_antigravity";
-
   const modelOptions =
     activeProvider === "ollama"
       ? ollamaModels.length > 0
@@ -526,19 +495,12 @@ export default function SettingsPage() {
         : settings?.activeModel
           ? [settings.activeModel]
           : ["llama3.2"]
-      : isGeminiAntigravity
-        ? (dynamicModels[activeProvider]?.length > 0 ? dynamicModels[activeProvider] : ANTIGRAVITY_MODELS)
-        : dynamicModels[activeProvider] || FALLBACK_MODEL_OPTIONS[activeProvider];
+      : dynamicModels[activeProvider] || FALLBACK_MODEL_OPTIONS[activeProvider];
 
   // Helper to get model options for any provider (for default/preview dropdowns)
   const getModelOptionsForProvider = (provider: LLMProviderName) => {
     if (provider === "ollama") {
       return ollamaModels.length > 0 ? ollamaModels : ["llama3.2"];
-    }
-    // Check if Gemini is using Antigravity mode
-    const isProviderAntigravity = provider === "gemini" && settings?.geminiAuthMode === "oauth_antigravity";
-    if (isProviderAntigravity) {
-      return dynamicModels[provider]?.length > 0 ? dynamicModels[provider] : ANTIGRAVITY_MODELS;
     }
     return dynamicModels[provider] || FALLBACK_MODEL_OPTIONS[provider];
   };
@@ -939,23 +901,17 @@ export default function SettingsPage() {
 
               // Auth mode options per provider
               const authModeOptions: { mode: AuthMode; label: string }[] =
-                p.name === "gemini"
+                p.name === "anthropic"
                   ? [
                     { mode: "api_key", label: "API Key" },
-                    { mode: "oauth_gemini_cli", label: "Gemini CLI" },
-                    { mode: "oauth_antigravity", label: "Antigravity" },
+                    { mode: "oauth", label: "OAuth" },
                   ]
-                  : p.name === "anthropic"
+                  : p.name === "openai"
                     ? [
                       { mode: "api_key", label: "API Key" },
-                      { mode: "oauth", label: "OAuth" },
+                      { mode: "oauth_openai_codex", label: "Codex OAuth" },
                     ]
-                    : p.name === "openai"
-                      ? [
-                        { mode: "api_key", label: "API Key" },
-                        { mode: "oauth_openai_codex", label: "Codex OAuth" },
-                      ]
-                      : [{ mode: "api_key", label: "API Key" }];
+                    : [{ mode: "api_key", label: "API Key" }];
 
               // Determine the sign-in label based on provider
               const signInLabel =
@@ -999,50 +955,24 @@ export default function SettingsPage() {
                                 modelsFetchedRef.current = false; // Allow refetch
                                 setModelsLoading((prev) => ({ ...prev, gemini: true }));
 
-                                if (mode === "oauth_antigravity") {
-                                  // Fetch Antigravity models (Claude, Gemini-3, GPT)
-                                  fetch("/api/models/antigravity")
-                                    .then((r) => r.json())
-                                    .then((data) => {
-                                      const raw = data.models || [];
-                                      const models: string[] = raw.map((m: any) => (typeof m === "string" ? m : m.id));
-                                      if (models.length > 0) {
-                                        setDynamicModels((prev) => ({ ...prev, gemini: models }));
-                                        // Auto-select first Antigravity model if current model is not in the list
-                                        // or if it's a standard Gemini model (gemini-2.x, gemini-1.x)
-                                        const isStandardGeminiModel = /^gemini-[12]\./.test(settings.activeModel);
-                                        if (!models.includes(settings.activeModel) || isStandardGeminiModel) {
-                                          const newModel = models[0] || "claude-opus-4-5-thinking";
-                                          setSettings((prev) => prev ? { ...prev, activeModel: newModel } : prev);
-                                          persistSettings({ activeModel: newModel });
-                                        }
+                                // Fetch standard Gemini models
+                                fetch("/api/models/gemini")
+                                  .then((r) => r.json())
+                                  .then((data) => {
+                                    const raw = data.models || [];
+                                    const models: string[] = raw.map((m: any) => (typeof m === "string" ? m : m.id));
+                                    if (models.length > 0) {
+                                      setDynamicModels((prev) => ({ ...prev, gemini: models }));
+                                      // Auto-select first Gemini model if needed
+                                      if (!models.includes(settings.activeModel)) {
+                                        const newModel = models[0] || "gemini-2.5-flash";
+                                        setSettings((prev) => prev ? { ...prev, activeModel: newModel } : prev);
+                                        persistSettings({ activeModel: newModel });
                                       }
-                                    })
-                                    .catch(() => { })
-                                    .finally(() => setModelsLoading((prev) => ({ ...prev, gemini: false })));
-                                } else {
-                                  // Fetch standard Gemini models
-                                  fetch("/api/models/gemini")
-                                    .then((r) => r.json())
-                                    .then((data) => {
-                                      const raw = data.models || [];
-                                      const models: string[] = raw.map((m: any) => (typeof m === "string" ? m : m.id));
-                                      if (models.length > 0) {
-                                        setDynamicModels((prev) => ({ ...prev, gemini: models }));
-                                        // Auto-select first Gemini model if current model is not a standard Gemini model
-                                        const isAntigravityModel = settings.activeModel.startsWith("claude") ||
-                                          settings.activeModel.startsWith("gemini-3") ||
-                                          settings.activeModel.startsWith("gpt-oss");
-                                        if (isAntigravityModel || !models.includes(settings.activeModel)) {
-                                          const newModel = models[0] || "gemini-2.5-flash";
-                                          setSettings((prev) => prev ? { ...prev, activeModel: newModel } : prev);
-                                          persistSettings({ activeModel: newModel });
-                                        }
-                                      }
-                                    })
-                                    .catch(() => { })
-                                    .finally(() => setModelsLoading((prev) => ({ ...prev, gemini: false })));
-                                }
+                                    }
+                                  })
+                                  .catch(() => { })
+                                  .finally(() => setModelsLoading((prev) => ({ ...prev, gemini: false })));
                               }
                             }}
                           >
@@ -1144,13 +1074,9 @@ export default function SettingsPage() {
                           <div className="text-xs text-muted-foreground">
                             {p.name === "anthropic" && authMode === "oauth"
                               ? "Sign in with your Anthropic account (Claude Pro/Max)."
-                              : authMode === "oauth_gemini_cli"
-                                ? "Sign in with your Google account using Gemini CLI credentials."
-                                : authMode === "oauth_antigravity"
-                                  ? "Sign in with your Google account using Antigravity (Cloud Code Assist)."
-                                  : authMode === "oauth_openai_codex"
-                                    ? "Sign in with your OpenAI account (ChatGPT Plus/Pro)."
-                                    : `Sign in with ${p.label}.`}
+                              : authMode === "oauth_openai_codex"
+                                ? "Sign in with your OpenAI account (ChatGPT Plus/Pro)."
+                                : `Sign in with ${p.label}.`}
                           </div>
                           <Button
                             variant="outline"
