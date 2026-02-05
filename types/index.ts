@@ -6,20 +6,10 @@ export type LLMProviderName = "openai" | "anthropic" | "gemini" | "ollama";
  * IMPORTANT: For Gemini/Google models:
  * - api_key: RECOMMENDED for personal/free use. Get key from https://aistudio.google.com/apikey
  *   Works with the public Gemini API (generativelanguage.googleapis.com)
- * 
- * - oauth_gemini_cli: For Vertex AI / Google Cloud ONLY (requires billing-enabled project)
- *   The public Gemini API does NOT support OAuth - you must use API keys for free tier
- *   This mode only works with Vertex AI endpoints, not the public API
- * 
- * - oauth_antigravity: For non-Google models (Claude) via Google Cloud Code Assist proxy
- *   Based on openclaw's implementation - uses project "rising-fact-p41fc"
- *   Models: claude-opus-4-5-thinking, claude-sonnet-4-5, etc.
  */
 export type AuthMode =
   | "api_key"                  // API Key (recommended for Gemini free tier)
   | "oauth"                    // Anthropic OAuth / generic
-  | "oauth_gemini_cli"         // Google Vertex AI OAuth → Vertex AI only, NOT public API
-  | "oauth_antigravity"        // Google Cloud Code Assist → Claude/non-Google models only
   | "oauth_openai_codex"       // OpenAI Codex (ChatGPT Plus/Pro)
   | "oauth_github_copilot";    // GitHub Copilot
 

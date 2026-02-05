@@ -7,7 +7,7 @@ import {
 } from "@/lib/oauth/pi-auth";
 
 /**
- * GET /api/oauth/{provider}/authorize?authMode=oauth_gemini_cli
+ * GET /api/oauth/{provider}/authorize?authMode=oauth
  *
  * Initiates an OAuth login flow using pi-ai's built-in provider.
  * Returns JSON with { sessionId, authUrl, instructions }.

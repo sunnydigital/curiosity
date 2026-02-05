@@ -9,12 +9,6 @@ import type {
 } from "@/types";
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
-// Cloud Code Assist endpoints for oauth_antigravity mode
-// Pi-ai uses production endpoint first, then falls back to sandbox
-const CLOUD_CODE_ASSIST_ENDPOINTS = [
-  "https://cloudcode-pa.googleapis.com",
-  "https://daily-cloudcode-pa.sandbox.googleapis.com",
-];
 
 export class GeminiProvider extends BaseLLMProvider {
   name = "gemini" as const;
@@ -22,7 +16,6 @@ export class GeminiProvider extends BaseLLMProvider {
   private apiKey: string;
   private accessToken: string | null;
   private projectId: string | null;
-  private isAntigravity: boolean;
 
   constructor(credential: string, useBearer = false) {
     super();
@@ -41,20 +34,16 @@ export class GeminiProvider extends BaseLLMProvider {
       }
       this.accessToken = token;
       this.projectId = project;
-      // Detect Antigravity mode by checking if projectId matches openclaw's default
-      this.isAntigravity = project === "rising-fact-p41fc" || project?.includes("antigravity");
       this.client = null; // SDK doesn't support Bearer; use REST
 
       console.log(`[GeminiProvider] OAuth mode initialized:`, {
         hasToken: !!token,
-        projectId: project,
-        isAntigravity: this.isAntigravity
+        projectId: project
       });
     } else {
       this.apiKey = credential;
       this.accessToken = null;
       this.projectId = null;
-      this.isAntigravity = false;
       this.client = new GoogleGenerativeAI(credential);
     }
   }
@@ -105,8 +94,7 @@ export class GeminiProvider extends BaseLLMProvider {
 
   private authHeaders(): Record<string, string> {
     if (this.accessToken) {
-      // Based on openclaw's Google Antigravity implementation:
-      // Use X-Goog-Api-Client header to identify as VS Code Cloud Shell Editor
+      // Use X-Goog-Api-Client header for Google API compatibility
       return {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.accessToken}`,
@@ -122,42 +110,11 @@ export class GeminiProvider extends BaseLLMProvider {
       console.log(`[GeminiProvider] modelUrl called with OAuth token:`, {
         model,
         method,
-        projectId: this.projectId,
-        isAntigravity: this.isAntigravity
+        projectId: this.projectId
       });
-
-      // Check if this is Antigravity mode (non-Google models via Google Cloud)
-      if (this.isAntigravity) {
-        // Antigravity provides access to Claude, Gemini-3, and GPT models via Cloud Code Assist
-        // Block standard Gemini models (gemini-1.x, gemini-2.x) which only work with API keys
-        const isStandardGeminiModel = /^gemini-[12]\./.test(model);
-        if (isStandardGeminiModel) {
-          throw new Error(
-            `Google Antigravity OAuth provides access to Gemini-3, Claude, and GPT models via Google Cloud Code Assist.\n` +
-            `You're trying to use model "${model}" which is a standard Gemini model that only works with API keys.\n\n` +
-            `Solutions:\n` +
-            `1. Switch to API key mode for standard Gemini models (gemini-1.x, gemini-2.x)\n` +
-            `2. Or use an Antigravity model like "claude-opus-4-5-thinking", "gemini-3-pro-high", or "gpt-oss-120b-medium"\n\n` +
-            `Note: The public Gemini API (generativelanguage.googleapis.com) only supports API keys.\n` +
-            `      Antigravity OAuth provides access to models via Google Cloud Code Assist.`
-          );
-        }
-
-        // Antigravity uses Google's internal streaming endpoint format (same as pi-ai library)
-        // URL format from pi-ai: {baseUrl}/v1internal:streamGenerateContent?alt=sse
-        // The model is passed in the request body, not the URL
-        // Return array of endpoints to try (production first, then sandbox)
-        if (method === "streamGenerateContent") {
-          return CLOUD_CODE_ASSIST_ENDPOINTS.map(base => `${base}/v1internal:streamGenerateContent?alt=sse`);
-        }
-
-        // For non-streaming methods, use v1internal:generateContent
-        return CLOUD_CODE_ASSIST_ENDPOINTS.map(base => `${base}/v1internal:generateContent`);
-      }
 
       // IMPORTANT: The public Gemini API does NOT support OAuth Bearer tokens!
       // OAuth with cloud-platform scope only works with Vertex AI/Google Cloud endpoints.
-      // This error will occur if you're using oauth_gemini_cli without a proper Google Cloud project.
       throw new Error(
         `The public Gemini API (generativelanguage.googleapis.com) does NOT support OAuth authentication.\n\n` +
         `The error "insufficient authentication scopes" means the OAuth token is not valid for this endpoint.\n\n` +
@@ -168,8 +125,7 @@ export class GeminiProvider extends BaseLLMProvider {
         `2. Use Vertex AI (enterprise): If you have a Google Cloud project with Vertex AI enabled\n` +
         `   - Set GOOGLE_CLOUD_PROJECT environment variable to your project ID\n` +
         `   - This requires a billing-enabled Google Cloud project\n\n` +
-        `Note: oauth_gemini_cli was designed for Vertex AI, not the free public Gemini API.\n` +
-        `The public API only supports API key authentication.`
+        `Note: The public API only supports API key authentication.`
       );
     }
 
@@ -198,17 +154,6 @@ export class GeminiProvider extends BaseLLMProvider {
         ...(req.maxTokens ? { maxOutputTokens: req.maxTokens } : {}),
       },
     };
-
-    // For Antigravity mode, wrap in the v1internal format
-    if (this.isAntigravity) {
-      // Use the discovered project, or fall back to OpenClaw's shared project
-      const projectId = this.projectId || "rising-fact-p41fc";
-      return {
-        project: projectId,
-        model: req.model,
-        request: requestBody,
-      };
-    }
 
     return requestBody;
   }
