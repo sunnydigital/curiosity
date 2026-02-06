@@ -36,6 +36,8 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
   const [selectedKB, setSelectedKB] = useState<string | null>(null);
   const [kbEntries, setKBEntries] = useState<any[]>([]);
   const [newEntry, setNewEntry] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -48,67 +50,125 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
     try {
       const res = await fetch("/api/memory");
       const data = await res.json();
-      if (Array.isArray(data)) setMemories(data);
-    } catch {}
+      if (data.error) {
+        setError(data.error);
+      } else if (Array.isArray(data)) {
+        setMemories(data);
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to fetch memories");
+    }
   };
 
   const fetchKnowledgeBases = async () => {
     try {
       const res = await fetch("/api/memory/knowledge-bases");
       const data = await res.json();
-      if (Array.isArray(data)) setKnowledgeBases(data);
-    } catch {}
+      if (data.error) {
+        setError(data.error);
+      } else if (Array.isArray(data)) {
+        setKnowledgeBases(data);
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to fetch knowledge bases");
+    }
   };
 
   const addMemory = async () => {
     if (!newMemory.trim()) return;
+    setLoading(true);
+    setError(null);
     try {
-      await fetch("/api/memory", {
+      const res = await fetch("/api/memory", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: newMemory.trim() }),
       });
-      setNewMemory("");
-      fetchMemories();
-    } catch {}
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setNewMemory("");
+        fetchMemories();
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to add memory");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const createKB = async () => {
     if (!newKBName.trim()) return;
+    setLoading(true);
+    setError(null);
     try {
-      await fetch("/api/memory/knowledge-bases", {
+      const res = await fetch("/api/memory/knowledge-bases", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newKBName.trim() }),
       });
-      setNewKBName("");
-      fetchKnowledgeBases();
-    } catch {}
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setNewKBName("");
+        fetchKnowledgeBases();
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to create knowledge base");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const deleteKB = async (id: string) => {
-    await fetch(`/api/memory/knowledge-bases/${id}`, { method: "DELETE" });
-    if (selectedKB === id) setSelectedKB(null);
-    fetchKnowledgeBases();
+    setError(null);
+    try {
+      await fetch(`/api/memory/knowledge-bases/${id}`, { method: "DELETE" });
+      if (selectedKB === id) setSelectedKB(null);
+      fetchKnowledgeBases();
+    } catch (e: any) {
+      setError(e.message || "Failed to delete knowledge base");
+    }
   };
 
   const fetchEntries = async (kbId: string) => {
-    const res = await fetch(`/api/memory/knowledge-bases/${kbId}/entries`);
-    const data = await res.json();
-    if (Array.isArray(data)) setKBEntries(data);
+    try {
+      const res = await fetch(`/api/memory/knowledge-bases/${kbId}/entries`);
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else if (Array.isArray(data)) {
+        setKBEntries(data);
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to fetch entries");
+    }
   };
 
   const addEntry = async () => {
     if (!selectedKB || !newEntry.trim()) return;
+    setLoading(true);
+    setError(null);
     try {
-      await fetch(`/api/memory/knowledge-bases/${selectedKB}/entries`, {
+      const res = await fetch(`/api/memory/knowledge-bases/${selectedKB}/entries`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: newEntry.trim() }),
       });
-      setNewEntry("");
-      fetchEntries(selectedKB);
-    } catch {}
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setNewEntry("");
+        fetchEntries(selectedKB);
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to add entry");
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -149,6 +209,17 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
       </div>
 
       <ScrollArea className="flex-1">
+        {error && (
+          <div className="mx-3 mt-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">
+            {error}
+            <button
+              className="ml-2 underline"
+              onClick={() => setError(null)}
+            >
+              dismiss
+            </button>
+          </div>
+        )}
         {activeTab === "memories" && (
           <div className="p-3 space-y-2">
             <div className="flex gap-1">
@@ -157,9 +228,10 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
                 onChange={(e) => setNewMemory(e.target.value)}
                 placeholder="Add a memory..."
                 className="h-8 text-xs"
-                onKeyDown={(e) => e.key === "Enter" && addMemory()}
+                onKeyDown={(e) => e.key === "Enter" && !loading && addMemory()}
+                disabled={loading}
               />
-              <Button size="sm" className="h-8" onClick={addMemory}>
+              <Button size="sm" className="h-8" onClick={addMemory} disabled={loading}>
                 <Plus className="h-3 w-3" />
               </Button>
             </div>
@@ -196,9 +268,10 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
                     onChange={(e) => setNewKBName(e.target.value)}
                     placeholder="New knowledge base..."
                     className="h-8 text-xs"
-                    onKeyDown={(e) => e.key === "Enter" && createKB()}
+                    onKeyDown={(e) => e.key === "Enter" && !loading && createKB()}
+                    disabled={loading}
                   />
-                  <Button size="sm" className="h-8" onClick={createKB}>
+                  <Button size="sm" className="h-8" onClick={createKB} disabled={loading}>
                     <Plus className="h-3 w-3" />
                   </Button>
                 </div>
@@ -256,9 +329,10 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
                     onChange={(e) => setNewEntry(e.target.value)}
                     placeholder="Add entry..."
                     className="h-8 text-xs"
-                    onKeyDown={(e) => e.key === "Enter" && addEntry()}
+                    onKeyDown={(e) => e.key === "Enter" && !loading && addEntry()}
+                    disabled={loading}
                   />
-                  <Button size="sm" className="h-8" onClick={addEntry}>
+                  <Button size="sm" className="h-8" onClick={addEntry} disabled={loading}>
                     <Plus className="h-3 w-3" />
                   </Button>
                 </div>

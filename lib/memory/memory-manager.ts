@@ -14,21 +14,32 @@ export async function onNewExchange(
   assistantContent: string
 ): Promise<void> {
   const settings = getSettings();
-  if (!settings.memoryEnabled) return;
+  console.log("[MemoryManager] onNewExchange called, memoryEnabled:", settings.memoryEnabled);
+
+  if (!settings.memoryEnabled) {
+    console.log("[MemoryManager] Memory is disabled, skipping");
+    return;
+  }
 
   try {
+    console.log("[MemoryManager] Extracting facts from exchange...");
     const facts = await extractFacts(userContent, assistantContent);
+    console.log("[MemoryManager] Got facts:", facts);
+
     for (const fact of facts) {
+      console.log("[MemoryManager] Generating embedding for:", fact);
       const embedding = await generateEmbedding(fact);
+      console.log("[MemoryManager] Creating memory with embedding length:", embedding.length);
       createMemory({
         content: fact,
         sourceChatId: chatId,
         sourceMessageId: userMessageId,
         embedding,
       });
+      console.log("[MemoryManager] Memory created successfully");
     }
-  } catch {
-    // Silently fail - memory extraction is best-effort
+  } catch (error) {
+    console.error("[MemoryManager] Error in onNewExchange:", error);
   }
 }
 

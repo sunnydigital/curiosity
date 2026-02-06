@@ -1,5 +1,37 @@
 export type LLMProviderName = "openai" | "anthropic" | "gemini" | "ollama";
 
+// Embedding mode: local (on-device) vs online (API-based)
+export type EmbeddingMode = "local" | "online";
+
+// Local embedding backends
+export type LocalEmbeddingBackend = "transformers" | "onnx" | "tflite" | "ollama";
+
+// Available local embedding models per backend
+export const LOCAL_EMBEDDING_MODELS: Record<LocalEmbeddingBackend, { id: string; name: string; dimensions: number }[]> = {
+  transformers: [
+    { id: "nomic-ai/nomic-embed-text-v1.5", name: "Nomic Embed v1.5", dimensions: 768 },
+    { id: "sentence-transformers/all-MiniLM-L6-v2", name: "MiniLM-L6-v2", dimensions: 384 },
+    { id: "sentence-transformers/all-mpnet-base-v2", name: "MPNet Base v2", dimensions: 768 },
+    { id: "BAAI/bge-small-en-v1.5", name: "BGE Small EN v1.5", dimensions: 384 },
+    { id: "BAAI/bge-base-en-v1.5", name: "BGE Base EN v1.5", dimensions: 768 },
+  ],
+  onnx: [
+    { id: "nomic-ai/nomic-embed-text-v1.5-onnx", name: "Nomic Embed v1.5 (ONNX)", dimensions: 768 },
+    { id: "sentence-transformers/all-MiniLM-L6-v2-onnx", name: "MiniLM-L6-v2 (ONNX)", dimensions: 384 },
+    { id: "BAAI/bge-small-en-v1.5-onnx", name: "BGE Small EN v1.5 (ONNX)", dimensions: 384 },
+  ],
+  tflite: [
+    { id: "sentence-transformers/all-MiniLM-L6-v2-tflite", name: "MiniLM-L6-v2 (TFLite)", dimensions: 384 },
+    { id: "universal-sentence-encoder-lite", name: "Universal Sentence Encoder Lite", dimensions: 512 },
+  ],
+  ollama: [
+    { id: "nomic-embed-text", name: "Nomic Embed Text", dimensions: 768 },
+    { id: "mxbai-embed-large", name: "MXBai Embed Large", dimensions: 1024 },
+    { id: "all-minilm", name: "All-MiniLM", dimensions: 384 },
+    { id: "snowflake-arctic-embed", name: "Snowflake Arctic Embed", dimensions: 1024 },
+  ],
+};
+
 /**
  * Authentication modes for LLM providers.
  * 
@@ -155,9 +187,13 @@ export interface Settings {
   geminiApiKey: string | null;
   ollamaBaseUrl: string;
   memoryEnabled: boolean;
+  // Embedding settings
+  embeddingMode: EmbeddingMode;
   embeddingProvider: LLMProviderName;
   embeddingModel: string;
   embeddingProviderOverride: boolean;
+  localEmbeddingBackend: LocalEmbeddingBackend;
+  localEmbeddingModel: string;
   decayLambda: number;
   similarityWeight: number;
   temporalWeight: number;

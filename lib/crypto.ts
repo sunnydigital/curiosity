@@ -5,9 +5,13 @@ const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 
 function getEncryptionKey(): Buffer {
-  const key =
-    process.env.CURIOSITY_ENCRYPTION_KEY ||
-    "default-dev-key-change-in-production-please!!!!!";
+  const key = process.env.CURIOSITY_ENCRYPTION_KEY;
+  if (!key) {
+    throw new Error(
+      "CURIOSITY_ENCRYPTION_KEY environment variable is required. " +
+        "Please set it to a secure random string (64+ characters recommended)."
+    );
+  }
   return crypto.scryptSync(key, "curiosity-salt", 32);
 }
 
