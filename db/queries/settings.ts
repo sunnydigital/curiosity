@@ -1,6 +1,6 @@
 import { getDb } from "@/db";
 import { encrypt, decrypt } from "@/lib/crypto";
-import type { Settings, LLMProviderName, AuthMode } from "@/types";
+import type { Settings, LLMProviderName, AuthMode, EmbeddingMode, LocalEmbeddingBackend } from "@/types";
 
 interface SettingsRow {
   active_provider: string;
@@ -39,6 +39,9 @@ interface SettingsRow {
   preview_anthropic_model: string;
   preview_gemini_model: string;
   preview_ollama_model: string;
+  embedding_mode: string;
+  local_embedding_backend: string;
+  local_embedding_model: string;
 }
 
 export function getSettings(): Settings {
@@ -60,9 +63,12 @@ export function getSettings(): Settings {
     geminiApiKey: row.gemini_api_key ? decrypt(row.gemini_api_key) : null,
     ollamaBaseUrl: row.ollama_base_url,
     memoryEnabled: row.memory_enabled === 1,
+    embeddingMode: (row.embedding_mode || "online") as EmbeddingMode,
     embeddingProvider: row.embedding_provider as LLMProviderName,
     embeddingModel: row.embedding_model,
     embeddingProviderOverride: row.embedding_provider_override === 1,
+    localEmbeddingBackend: (row.local_embedding_backend || "transformers") as LocalEmbeddingBackend,
+    localEmbeddingModel: row.local_embedding_model || "nomic-ai/nomic-embed-text-v1.5",
     decayLambda: row.decay_lambda,
     similarityWeight: row.similarity_weight,
     temporalWeight: row.temporal_weight,
@@ -125,6 +131,10 @@ export function updateSettings(settings: Partial<Settings>): void {
     updates.push("memory_enabled = ?");
     values.push(settings.memoryEnabled ? 1 : 0);
   }
+  if (settings.embeddingMode !== undefined) {
+    updates.push("embedding_mode = ?");
+    values.push(settings.embeddingMode);
+  }
   if (settings.embeddingProvider !== undefined) {
     updates.push("embedding_provider = ?");
     values.push(settings.embeddingProvider);
@@ -132,6 +142,14 @@ export function updateSettings(settings: Partial<Settings>): void {
   if (settings.embeddingModel !== undefined) {
     updates.push("embedding_model = ?");
     values.push(settings.embeddingModel);
+  }
+  if (settings.localEmbeddingBackend !== undefined) {
+    updates.push("local_embedding_backend = ?");
+    values.push(settings.localEmbeddingBackend);
+  }
+  if (settings.localEmbeddingModel !== undefined) {
+    updates.push("local_embedding_model = ?");
+    values.push(settings.localEmbeddingModel);
   }
   if (settings.decayLambda !== undefined) {
     updates.push("decay_lambda = ?");
