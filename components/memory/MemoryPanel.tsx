@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Brain, Database, Plus, Trash2, X } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Brain, Database, Plus, Trash2, X, AlertTriangle, RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -10,6 +10,7 @@ import { Separator } from "@/components/ui/separator";
 interface MemoryItem {
   id: string;
   content: string;
+  embeddingModel: string | null;
   strength?: number;
   accessCount?: number;
   createdAt: string;
@@ -29,38 +30,36 @@ interface MemoryPanelProps {
 
 export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
   const [memories, setMemories] = useState<MemoryItem[]>([]);
+  const [currentEmbeddingModel, setCurrentEmbeddingModel] = useState<string | null>(null);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [activeTab, setActiveTab] = useState<"memories" | "knowledge">("memories");
-  const [newMemory, setNewMemory] = useState("");
   const [newKBName, setNewKBName] = useState("");
   const [selectedKB, setSelectedKB] = useState<string | null>(null);
   const [kbEntries, setKBEntries] = useState<any[]>([]);
   const [newEntry, setNewEntry] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [reembedding, setReembedding] = useState<string | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    if (isOpen) {
-      fetchMemories();
-      fetchKnowledgeBases();
-    }
-  }, [isOpen]);
-
-  const fetchMemories = async () => {
+  const fetchMemories = useCallback(async () => {
     try {
       const res = await fetch("/api/memory");
       const data = await res.json();
       if (data.error) {
         setError(data.error);
+      } else if (data.memories && Array.isArray(data.memories)) {
+        setMemories(data.memories);
+        setCurrentEmbeddingModel(data.currentEmbeddingModel || null);
       } else if (Array.isArray(data)) {
         setMemories(data);
       }
     } catch (e: any) {
       setError(e.message || "Failed to fetch memories");
     }
-  };
+  }, []);
 
-  const fetchKnowledgeBases = async () => {
+  const fetchKnowledgeBases = useCallback(async () => {
     try {
       const res = await fetch("/api/memory/knowledge-bases");
       const data = await res.json();
@@ -72,30 +71,105 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
     } catch (e: any) {
       setError(e.message || "Failed to fetch knowledge bases");
     }
-  };
+  }, []);
 
-  const addMemory = async () => {
-    if (!newMemory.trim()) return;
-    setLoading(true);
+  const fetchEntries = useCallback(async (kbId: string) => {
+    try {
+      const res = await fetch(`/api/memory/knowledge-bases/${kbId}/entries`);
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+      } else if (Array.isArray(data)) {
+        setKBEntries(data);
+      }
+    } catch (e: any) {
+      setError(e.message || "Failed to fetch entries");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchMemories();
+      fetchKnowledgeBases();
+    }
+  }, [isOpen, fetchMemories, fetchKnowledgeBases]);
+
+  const activeTabRef = useRef(activeTab);
+  const selectedKBRef = useRef(selectedKB);
+  activeTabRef.current = activeTab;
+  selectedKBRef.current = selectedKB;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const interval = setInterval(() => {
+      fetchMemories();
+      if (activeTabRef.current === "knowledge" && selectedKBRef.current) {
+        fetchEntries(selectedKBRef.current);
+      } else if (activeTabRef.current === "knowledge") {
+        fetchKnowledgeBases();
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [isOpen, fetchMemories, fetchKnowledgeBases, fetchEntries]);
+
+  const deleteMemory = async (id: string) => {
     setError(null);
     try {
-      const res = await fetch("/api/memory", {
+      await fetch("/api/memory", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      setMemories((prev) => prev.filter((m) => m.id !== id));
+    } catch (e: any) {
+      setError(e.message || "Failed to delete memory");
+    }
+  };
+
+  const deleteByModel = async (model: string | null) => {
+    setError(null);
+    try {
+      await fetch("/api/memory", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ embeddingModel: model }),
+      });
+      fetchMemories();
+    } catch (e: any) {
+      setError(e.message || "Failed to delete memories");
+    }
+  };
+
+  const reembedByModel = async (oldModel: string | null) => {
+    const key = oldModel ?? "__null__";
+    setReembedding(key);
+    setError(null);
+    try {
+      const res = await fetch("/api/memory/reembed", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: newMemory.trim() }),
+        body: JSON.stringify({ oldModel }),
       });
       const data = await res.json();
       if (data.error) {
         setError(data.error);
       } else {
-        setNewMemory("");
         fetchMemories();
       }
     } catch (e: any) {
-      setError(e.message || "Failed to add memory");
+      setError(e.message || "Failed to re-embed memories");
     } finally {
-      setLoading(false);
+      setReembedding(null);
     }
+  };
+
+  const toggleGroup = (key: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
 
   const createKB = async () => {
@@ -133,20 +207,6 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
     }
   };
 
-  const fetchEntries = async (kbId: string) => {
-    try {
-      const res = await fetch(`/api/memory/knowledge-bases/${kbId}/entries`);
-      const data = await res.json();
-      if (data.error) {
-        setError(data.error);
-      } else if (Array.isArray(data)) {
-        setKBEntries(data);
-      }
-    } catch (e: any) {
-      setError(e.message || "Failed to fetch entries");
-    }
-  };
-
   const addEntry = async () => {
     if (!selectedKB || !newEntry.trim()) return;
     setLoading(true);
@@ -170,6 +230,22 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
       setLoading(false);
     }
   };
+
+  // Split memories into active vs invalidated groups
+  const activeMemories = memories.filter(
+    (m) => m.embeddingModel === currentEmbeddingModel || m.embeddingModel === null
+  );
+  const invalidatedMemories = memories.filter(
+    (m) => m.embeddingModel !== null && m.embeddingModel !== currentEmbeddingModel
+  );
+
+  // Group invalidated memories by model
+  const invalidatedByModel = new Map<string, MemoryItem[]>();
+  for (const m of invalidatedMemories) {
+    const key = m.embeddingModel!;
+    if (!invalidatedByModel.has(key)) invalidatedByModel.set(key, []);
+    invalidatedByModel.get(key)!.push(m);
+  }
 
   if (!isOpen) return null;
 
@@ -222,26 +298,27 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
         )}
         {activeTab === "memories" && (
           <div className="p-3 space-y-2">
-            <div className="flex gap-1">
-              <Input
-                value={newMemory}
-                onChange={(e) => setNewMemory(e.target.value)}
-                placeholder="Add a memory..."
-                className="h-8 text-xs"
-                onKeyDown={(e) => e.key === "Enter" && !loading && addMemory()}
-                disabled={loading}
-              />
-              <Button size="sm" className="h-8" onClick={addMemory} disabled={loading}>
-                <Plus className="h-3 w-3" />
-              </Button>
-            </div>
+            {currentEmbeddingModel && (
+              <div className="text-[10px] text-muted-foreground">
+                Current model: {currentEmbeddingModel}
+              </div>
+            )}
+
             <Separator />
-            {memories.map((m) => (
+
+            {activeMemories.map((m) => (
               <div
                 key={m.id}
-                className="rounded-md border border-border p-2 text-xs"
+                className="group relative rounded-md border border-border p-2 text-xs"
               >
-                <div>{m.content}</div>
+                <button
+                  className="absolute right-1 top-1 rounded p-0.5 text-destructive opacity-0 transition-opacity hover:bg-destructive/10 group-hover:opacity-100"
+                  onClick={() => deleteMemory(m.id)}
+                  title="Delete memory"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+                <div className="pr-4">{m.content}</div>
                 {m.strength !== undefined && (
                   <div className="mt-1 text-[10px] text-muted-foreground">
                     Strength: {m.strength.toFixed(2)} | Accessed:{" "}
@@ -250,11 +327,84 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
                 )}
               </div>
             ))}
-            {memories.length === 0 && (
+            {activeMemories.length === 0 && invalidatedMemories.length === 0 && (
               <div className="py-4 text-center text-xs text-muted-foreground">
                 No memories yet. Chat to build up context.
               </div>
             )}
+
+            {Array.from(invalidatedByModel.entries()).map(([model, modelMemories]) => {
+              const groupKey = model;
+              const isExpanded = expandedGroups.has(groupKey);
+              const isReembeddingThis = reembedding === groupKey;
+
+              return (
+                <div key={groupKey} className="mt-3">
+                  <button
+                    className="flex w-full items-center gap-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-xs text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
+                    onClick={() => toggleGroup(groupKey)}
+                  >
+                    {isExpanded ? (
+                      <ChevronDown className="h-3 w-3 shrink-0" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3 shrink-0" />
+                    )}
+                    <AlertTriangle className="h-3 w-3 shrink-0" />
+                    <span className="truncate font-medium">{model}</span>
+                    <span className="ml-auto shrink-0 text-[10px] opacity-75">
+                      {modelMemories.length} invalidated
+                    </span>
+                  </button>
+
+                  {isExpanded && (
+                    <div className="mt-1 space-y-1">
+                      <div className="flex gap-1 px-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 flex-1 text-[10px]"
+                          onClick={() => reembedByModel(model)}
+                          disabled={isReembeddingThis}
+                        >
+                          <RefreshCw className={`mr-1 h-2.5 w-2.5 ${isReembeddingThis ? "animate-spin" : ""}`} />
+                          {isReembeddingThis ? "Re-embedding..." : "Re-embed All"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 flex-1 text-[10px] text-destructive hover:text-destructive"
+                          onClick={() => deleteByModel(model)}
+                        >
+                          <Trash2 className="mr-1 h-2.5 w-2.5" />
+                          Delete All
+                        </Button>
+                      </div>
+                      {modelMemories.map((m) => (
+                        <div
+                          key={m.id}
+                          className="group relative rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs opacity-70"
+                        >
+                          <button
+                            className="absolute right-1 top-1 rounded p-0.5 text-destructive opacity-0 transition-opacity hover:bg-destructive/10 group-hover:opacity-100"
+                            onClick={() => deleteMemory(m.id)}
+                            title="Delete memory"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                          <div className="pr-4">{m.content}</div>
+                          {m.strength !== undefined && (
+                            <div className="mt-1 text-[10px] text-muted-foreground">
+                              Strength: {m.strength.toFixed(2)} | Accessed:{" "}
+                              {m.accessCount}x
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -294,17 +444,15 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
                         {kb.entryCount} entries
                       </div>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 opacity-0 group-hover:opacity-100"
+                    <button
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-destructive opacity-0 hover:bg-destructive/10 group-hover:opacity-100"
                       onClick={(e) => {
                         e.stopPropagation();
                         deleteKB(kb.id);
                       }}
                     >
                       <Trash2 className="h-3 w-3" />
-                    </Button>
+                    </button>
                   </div>
                 ))}
                 {knowledgeBases.length === 0 && (

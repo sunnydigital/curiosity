@@ -24,7 +24,9 @@
       "WebFetch(domain:docs.anthropic.com)",
       "Bash(node:*)",
       "WebFetch(domain:www.npmjs.com)",
-      "Bash(npm run dev:*)"
+      "Bash(npm run dev:*)",
+      "Bash(python:*)",
+      "Bash(ollama list:*)"
     ]
   }
 }

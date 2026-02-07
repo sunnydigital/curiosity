@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { GitBranch, X, Loader2, Plus } from "lucide-react";
+import { GitBranch, X, Loader2, Plus, Database, Check } from "lucide-react";
 import Markdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -97,6 +97,57 @@ export function TextSelectionToolbar({
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryError, setSummaryError] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [showKBPicker, setShowKBPicker] = useState(false);
+  const [kbList, setKBList] = useState<{ id: string; name: string }[]>([]);
+  const [kbLoading, setKBLoading] = useState(false);
+  const [kbAdded, setKBAdded] = useState<string | null>(null); // id of KB we just added to
+  const kbPickerRef = useRef<HTMLDivElement>(null);
+
+  // Close KB picker on outside click
+  useEffect(() => {
+    if (!showKBPicker) return;
+    const handleClick = (e: MouseEvent) => {
+      if (kbPickerRef.current && !kbPickerRef.current.contains(e.target as Node)) {
+        setShowKBPicker(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showKBPicker]);
+
+  // Fetch KB list when picker opens
+  useEffect(() => {
+    if (!showKBPicker) return;
+    (async () => {
+      try {
+        const res = await fetch("/api/memory/knowledge-bases");
+        if (res.ok) {
+          const data = await res.json();
+          setKBList(data);
+        }
+      } catch { /* ignore */ }
+    })();
+  }, [showKBPicker]);
+
+  const addToKB = async (kbId: string) => {
+    setKBLoading(true);
+    try {
+      const res = await fetch(`/api/memory/knowledge-bases/${kbId}/entries`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: selectedText }),
+      });
+      if (res.ok) {
+        setKBAdded(kbId);
+        setTimeout(() => {
+          setShowKBPicker(false);
+          setKBAdded(null);
+        }, 1000);
+      }
+    } catch { /* ignore */ }
+    setKBLoading(false);
+  };
+
   // Persist whenever shortcuts change
   useEffect(() => {
     saveShortcuts(shortcuts);
@@ -316,6 +367,42 @@ export function TextSelectionToolbar({
             <Plus className="h-3 w-3" />
             Add
           </Button>
+          <div className="relative" ref={kbPickerRef}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 text-xs"
+              onClick={() => setShowKBPicker((v) => !v)}
+            >
+              <Database className="h-3 w-3" />
+              Add to KB
+            </Button>
+            {showKBPicker && (
+              <div className="absolute left-0 top-full mt-1 z-50 min-w-[180px] rounded-md border bg-popover p-1 shadow-md">
+                {kbList.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                    No knowledge bases found
+                  </div>
+                ) : (
+                  kbList.map((kb) => (
+                    <button
+                      key={kb.id}
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
+                      disabled={kbLoading}
+                      onClick={() => addToKB(kb.id)}
+                    >
+                      {kbAdded === kb.id ? (
+                        <Check className="h-3 w-3 text-green-500" />
+                      ) : (
+                        <Database className="h-3 w-3 text-muted-foreground" />
+                      )}
+                      {kb.name}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
           <Button
             variant="ghost"
             size="sm"

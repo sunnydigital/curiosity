@@ -30,11 +30,12 @@ export async function POST(
   const body = await request.json();
 
   try {
-    const embedding = await generateEmbedding(body.content);
+    const { embedding, model } = await generateEmbedding(body.content);
     const entry = addKBEntry({
       knowledgeBaseId: kbId,
       content: body.content,
       embedding,
+      embeddingModel: model,
     });
 
     return NextResponse.json({

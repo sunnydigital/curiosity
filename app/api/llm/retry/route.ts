@@ -44,8 +44,8 @@ export async function POST(request: NextRequest) {
     if (memoryContext) {
       llmMessages.push({ role: "system", content: memoryContext });
     }
-  } catch {
-    // Memory retrieval is best-effort
+  } catch (err) {
+    console.error("[Retry] Memory context retrieval failed:", err);
   }
 
   llmMessages.push(
@@ -93,6 +93,7 @@ export async function POST(request: NextRequest) {
             if (chunk.done) {
               actualProvider = executor.actualProvider;
               actualModel = executor.actualModel;
+              break;
             }
           }
         } else {
@@ -134,10 +135,12 @@ export async function POST(request: NextRequest) {
           )
         );
 
-        // Extract facts for memory (async, non-blocking)
-        onNewExchange(userMessage.chatId, userMessage.id, userMessage.content, fullContent).catch(
-          () => { }
-        );
+        // Extract facts for memory — await so it completes before the stream closes
+        try {
+          await onNewExchange(userMessage.chatId, userMessage.id, userMessage.content, fullContent);
+        } catch (err) {
+          console.error("[Retry] Memory extraction failed:", err);
+        }
 
         // Auto-title chat if it's the first exchange
         const chat = getChat(userMessage.chatId);

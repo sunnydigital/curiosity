@@ -9,6 +9,7 @@ interface MemoryRow {
   source_chat_id: string | null;
   source_message_id: string | null;
   embedding: Buffer;
+  embedding_model: string | null;
   created_at: string;
   last_accessed_at: string;
   access_count: number;
@@ -26,6 +27,7 @@ function rowToMemory(row: MemoryRow): Memory {
       row.embedding.byteOffset,
       row.embedding.byteLength / 4
     ),
+    embeddingModel: row.embedding_model,
     createdAt: row.created_at,
     lastAccessedAt: row.last_accessed_at,
     accessCount: row.access_count,
@@ -38,20 +40,22 @@ export function createMemory(params: {
   sourceChatId?: string | null;
   sourceMessageId?: string | null;
   embedding: number[];
+  embeddingModel?: string | null;
 }): Memory {
   const db = getDb();
   const id = uuidv4();
   const embeddingBuf = embeddingToBuffer(params.embedding);
 
   db.prepare(
-    `INSERT INTO memories (id, content, source_chat_id, source_message_id, embedding)
-     VALUES (?, ?, ?, ?, ?)`
+    `INSERT INTO memories (id, content, source_chat_id, source_message_id, embedding, embedding_model)
+     VALUES (?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     params.content,
     params.sourceChatId || null,
     params.sourceMessageId || null,
-    embeddingBuf
+    embeddingBuf,
+    params.embeddingModel || null
   );
 
   return getMemory(id)!;
@@ -80,12 +84,20 @@ export function searchMemories(
     similarityWeight: number;
     temporalWeight: number;
     topK: number;
+    embeddingModel?: string | null;
   }
 ): (Memory & { similarityScore: number; temporalScore: number; combinedScore: number })[] {
   const memories = getAllMemories();
   const now = Date.now();
 
-  const scored = memories.map((memory) => {
+  // Only compare memories that share the same embedding model (or legacy NULL)
+  const compatible = options.embeddingModel
+    ? memories.filter(
+        (m) => m.embeddingModel === options.embeddingModel || m.embeddingModel === null
+      )
+    : memories;
+
+  const scored = compatible.map((memory) => {
     const memEmbedding = Array.from(memory.embedding);
     const similarityScore = cosineSimilarity(queryEmbedding, memEmbedding);
 
@@ -125,4 +137,53 @@ export function updateMemoryAccess(id: string): void {
 export function deleteMemory(id: string): void {
   const db = getDb();
   db.prepare("DELETE FROM memories WHERE id = ?").run(id);
+}
+
+export function deleteAllMemories(): void {
+  const db = getDb();
+  db.prepare("DELETE FROM memories").run();
+}
+
+export function deleteMemoriesByEmbeddingModel(model: string | null): void {
+  const db = getDb();
+  if (model === null) {
+    db.prepare("DELETE FROM memories WHERE embedding_model IS NULL").run();
+  } else {
+    db.prepare("DELETE FROM memories WHERE embedding_model = ?").run(model);
+  }
+}
+
+export function getDistinctEmbeddingModels(): (string | null)[] {
+  const db = getDb();
+  const rows = db
+    .prepare("SELECT DISTINCT embedding_model FROM memories ORDER BY embedding_model")
+    .all() as { embedding_model: string | null }[];
+  return rows.map((r) => r.embedding_model);
+}
+
+export function updateMemoryEmbedding(
+  id: string,
+  embedding: number[],
+  embeddingModel: string
+): void {
+  const db = getDb();
+  const embeddingBuf = embeddingToBuffer(embedding);
+  db.prepare(
+    "UPDATE memories SET embedding = ?, embedding_model = ? WHERE id = ?"
+  ).run(embeddingBuf, embeddingModel, id);
+}
+
+export function getMemoriesByEmbeddingModel(model: string | null): Memory[] {
+  const db = getDb();
+  let rows: MemoryRow[];
+  if (model === null) {
+    rows = db
+      .prepare("SELECT * FROM memories WHERE embedding_model IS NULL ORDER BY created_at DESC")
+      .all() as MemoryRow[];
+  } else {
+    rows = db
+      .prepare("SELECT * FROM memories WHERE embedding_model = ? ORDER BY created_at DESC")
+      .all(model) as MemoryRow[];
+  }
+  return rows.map(rowToMemory);
 }

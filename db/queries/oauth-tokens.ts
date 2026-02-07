@@ -32,16 +32,23 @@ export function getOAuthTokens(
     metadata = null;
   }
 
-  return {
-    provider: row.provider as LLMProviderName,
-    accessToken: decrypt(row.access_token),
-    refreshToken: row.refresh_token ? decrypt(row.refresh_token) : null,
-    tokenType: row.token_type,
-    expiresAt: row.expires_at,
-    scope: row.scope,
-    subscriptionTier: (row.subscription_tier || "unknown") as SubscriptionTier,
-    subscriptionMetadata: metadata,
-  };
+  try {
+    return {
+      provider: row.provider as LLMProviderName,
+      accessToken: decrypt(row.access_token),
+      refreshToken: row.refresh_token ? decrypt(row.refresh_token) : null,
+      tokenType: row.token_type,
+      expiresAt: row.expires_at,
+      scope: row.scope,
+      subscriptionTier: (row.subscription_tier || "unknown") as SubscriptionTier,
+      subscriptionMetadata: metadata,
+    };
+  } catch (err) {
+    // Encrypted tokens are unreadable (key changed or corrupted) — purge them
+    console.warn(`[OAuth] Failed to decrypt tokens for ${provider}, clearing stale data:`, (err as Error).message);
+    deleteOAuthTokens(provider);
+    return null;
+  }
 }
 
 /**

@@ -26,6 +26,9 @@ yarn-debug.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# encryption key (auto-generated)
+.curiosity-key
+
 # database
 *.db
 *.db-journal

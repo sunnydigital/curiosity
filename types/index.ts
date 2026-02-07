@@ -29,6 +29,11 @@ export const LOCAL_EMBEDDING_MODELS: Record<LocalEmbeddingBackend, { id: string;
     { id: "mxbai-embed-large", name: "MXBai Embed Large", dimensions: 1024 },
     { id: "all-minilm", name: "All-MiniLM", dimensions: 384 },
     { id: "snowflake-arctic-embed", name: "Snowflake Arctic Embed", dimensions: 1024 },
+    { id: "snowflake-arctic-embed2", name: "Snowflake Arctic Embed v2", dimensions: 1024 },
+    { id: "bge-m3", name: "BGE-M3 (Multilingual)", dimensions: 1024 },
+    { id: "bge-large", name: "BGE Large", dimensions: 1024 },
+    { id: "granite-embedding", name: "Granite Embedding", dimensions: 768 },
+    { id: "paraphrase-multilingual", name: "Paraphrase Multilingual", dimensions: 768 },
   ],
 };
 
@@ -152,6 +157,7 @@ export interface Memory {
   sourceChatId: string | null;
   sourceMessageId: string | null;
   embedding: Float32Array;
+  embeddingModel: string | null;
   createdAt: string;
   lastAccessedAt: string;
   accessCount: number;
@@ -176,6 +182,7 @@ export interface KnowledgeBaseEntry {
   memoryId: string | null;
   content: string;
   embedding: Float32Array;
+  embeddingModel: string | null;
   createdAt: string;
 }
 

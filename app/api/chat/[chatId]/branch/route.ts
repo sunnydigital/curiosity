@@ -5,6 +5,7 @@ import { getSettings } from "@/db/queries/settings";
 import { getProviderAsync } from "@/lib/llm/provider-registry";
 import { FailoverExecutor } from "@/lib/llm/failover";
 import { BRANCH_PROMPTS, DEFAULT_SYSTEM_PROMPT } from "@/lib/constants";
+import { onNewExchange } from "@/lib/memory/memory-manager";
 import type { LLMMessage, BranchCreationRequest, FailoverEvent } from "@/types";
 
 export async function POST(
@@ -94,6 +95,7 @@ export async function POST(
             if (chunk.done) {
               actualProvider = executor.actualProvider;
               actualModel = executor.actualModel;
+              break;
             }
           }
         } else {
@@ -134,6 +136,13 @@ export async function POST(
             })}\n\n`
           )
         );
+
+        // Extract facts for memory
+        try {
+          await onNewExchange(chatId, branchRoot.id, branchContent, fullContent);
+        } catch (err) {
+          console.error("[Branch] Memory extraction failed:", err);
+        }
 
         controller.close();
       } catch (error: any) {

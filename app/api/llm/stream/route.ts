@@ -50,8 +50,8 @@ export async function POST(request: NextRequest) {
     if (memoryContext) {
       llmMessages.push({ role: "system", content: memoryContext });
     }
-  } catch {
-    // Memory retrieval is best-effort
+  } catch (err) {
+    console.error("[Stream] Memory context retrieval failed:", err);
   }
 
   llmMessages.push(
@@ -162,6 +162,7 @@ export async function POST(request: NextRequest) {
             if (chunk.done) {
               actualProvider = executor.actualProvider;
               actualModel = executor.actualModel;
+              break;
             }
           }
         } else {
@@ -184,6 +185,8 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        console.log(`[Stream] Streaming complete. fullContent length: ${fullContent.length}, provider: ${actualProvider}, model: ${actualModel}`);
+
         const assistantMessage = createMessage({
           chatId,
           parentId: userMessage.id,
@@ -204,10 +207,12 @@ export async function POST(request: NextRequest) {
           )
         );
 
-        // Extract facts for memory (async, non-blocking)
-        onNewExchange(chatId, userMessage.id, content, fullContent).catch(
-          () => { }
-        );
+        // Extract facts for memory — await so it completes before the stream closes
+        try {
+          await onNewExchange(chatId, userMessage.id, content, fullContent);
+        } catch (err) {
+          console.error("[Stream] Memory extraction failed:", err);
+        }
 
         controller.close();
       } catch (error: any) {
