@@ -360,7 +360,7 @@ export class GeminiProvider extends BaseLLMProvider {
 
   async embed(req: EmbeddingRequest): Promise<EmbeddingResponse> {
     if (this.accessToken) {
-      const model = req.model || "text-embedding-004";
+      const model = req.model || "gemini-embedding-001";
       const url = this.modelUrl(model, "embedContent");
       const response = await fetch(url, {
         method: "POST",
@@ -377,7 +377,7 @@ export class GeminiProvider extends BaseLLMProvider {
     }
 
     const model = this.client!.getGenerativeModel({
-      model: req.model || "text-embedding-004",
+      model: req.model || "gemini-embedding-001",
     });
     const result = await model.embedContent(req.text);
     return {

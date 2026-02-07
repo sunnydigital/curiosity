@@ -17,6 +17,7 @@ interface KBEntryRow {
   memory_id: string | null;
   content: string;
   embedding: Buffer;
+  embedding_model: string | null;
   created_at: string;
 }
 
@@ -41,6 +42,7 @@ function rowToEntry(row: KBEntryRow): KnowledgeBaseEntry {
       row.embedding.byteOffset,
       row.embedding.byteLength / 4
     ),
+    embeddingModel: row.embedding_model,
     createdAt: row.created_at,
   };
 }
@@ -115,15 +117,16 @@ export function addKBEntry(params: {
   knowledgeBaseId: string;
   content: string;
   embedding: number[];
+  embeddingModel?: string | null;
   memoryId?: string | null;
 }): KnowledgeBaseEntry {
   const db = getDb();
   const id = uuidv4();
   const embeddingBuf = embeddingToBuffer(params.embedding);
   db.prepare(
-    `INSERT INTO knowledge_base_entries (id, knowledge_base_id, memory_id, content, embedding)
-     VALUES (?, ?, ?, ?, ?)`
-  ).run(id, params.knowledgeBaseId, params.memoryId || null, params.content, embeddingBuf);
+    `INSERT INTO knowledge_base_entries (id, knowledge_base_id, memory_id, content, embedding, embedding_model)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(id, params.knowledgeBaseId, params.memoryId || null, params.content, embeddingBuf, params.embeddingModel || null);
   return getKBEntry(id)!;
 }
 
@@ -153,7 +156,8 @@ export function deleteKBEntry(id: string): void {
 export function searchKBEntries(
   queryEmbedding: number[],
   topK: number = 5,
-  knowledgeBaseId?: string
+  knowledgeBaseId?: string,
+  embeddingModel?: string | null
 ): (KnowledgeBaseEntry & { similarityScore: number })[] {
   const db = getDb();
   let rows: KBEntryRow[];
@@ -165,7 +169,14 @@ export function searchKBEntries(
     rows = db.prepare("SELECT * FROM knowledge_base_entries").all() as KBEntryRow[];
   }
 
-  const entries = rows.map((row) => {
+  // Only compare entries with compatible embedding models
+  const compatible = embeddingModel
+    ? rows.filter(
+        (r) => r.embedding_model === embeddingModel || r.embedding_model === null
+      )
+    : rows;
+
+  const entries = compatible.map((row) => {
     const entry = rowToEntry(row);
     const entryEmbedding = Array.from(entry.embedding);
     const similarityScore = cosineSimilarity(queryEmbedding, entryEmbedding);

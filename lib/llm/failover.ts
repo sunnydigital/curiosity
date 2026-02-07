@@ -165,15 +165,29 @@ export class FailoverExecutor {
     return this._actualModel;
   }
 
+  /**
+   * Resolve the model for a target provider during failover.
+   * Uses the user's configured default model for each provider.
+   */
+  private resolveModel(providerName: LLMProviderName, requestModel: string): string {
+    if (providerName === this.settings.activeProvider) {
+      return requestModel;
+    }
+    const defaultModelMap: Record<LLMProviderName, string> = {
+      openai: this.settings.defaultOpenaiModel,
+      anthropic: this.settings.defaultAnthropicModel,
+      gemini: this.settings.defaultGeminiModel,
+      ollama: this.settings.defaultOllamaModel,
+    };
+    return defaultModelMap[providerName] || resolveEquivalentModel(requestModel, providerName);
+  }
+
   async *stream(
     req: LLMCompletionRequest
   ): AsyncGenerator<LLMStreamChunk, void, unknown> {
     for (let i = 0; i < this.chain.length; i++) {
       const providerName = this.chain[i];
-      const model =
-        providerName === this.settings.activeProvider
-          ? req.model
-          : resolveEquivalentModel(req.model, providerName);
+      const model = this.resolveModel(providerName, req.model);
 
       console.log(`[Failover] Attempting provider ${i + 1}/${this.chain.length}: ${providerName} with model ${model}`);
 
@@ -222,10 +236,7 @@ export class FailoverExecutor {
   ): Promise<LLMCompletionResponse> {
     for (let i = 0; i < this.chain.length; i++) {
       const providerName = this.chain[i];
-      const model =
-        providerName === this.settings.activeProvider
-          ? req.model
-          : resolveEquivalentModel(req.model, providerName);
+      const model = this.resolveModel(providerName, req.model);
 
       try {
         const provider = await getProviderAsync(providerName, this.settings);

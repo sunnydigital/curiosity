@@ -18,18 +18,19 @@ export async function retrieveRelevantMemories(
   if (!settings.memoryEnabled) return [];
 
   try {
-    const queryEmbedding = await generateEmbedding(queryText);
+    const { embedding: queryEmbedding, model: queryModel } = await generateEmbedding(queryText);
 
-    // Search general memories with time decay
+    // Search general memories with time decay (only compatible embeddings)
     const memories = searchMemories(queryEmbedding, {
       lambda: settings.decayLambda,
       similarityWeight: settings.similarityWeight,
       temporalWeight: settings.temporalWeight,
       topK,
+      embeddingModel: queryModel,
     });
 
-    // Search knowledge base entries (no decay)
-    const kbEntries = searchKBEntries(queryEmbedding, topK);
+    // Search knowledge base entries (no decay, only compatible embeddings)
+    const kbEntries = searchKBEntries(queryEmbedding, topK, undefined, queryModel);
 
     // Merge and deduplicate
     const results: RetrievedMemory[] = [];
@@ -57,7 +58,8 @@ export async function retrieveRelevantMemories(
     // Sort by score and take top K
     results.sort((a, b) => b.score - a.score);
     return results.slice(0, topK);
-  } catch {
+  } catch (err) {
+    console.error("[MemoryRetrieval] Error retrieving memories:", err);
     return [];
   }
 }

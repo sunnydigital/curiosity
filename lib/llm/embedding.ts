@@ -4,10 +4,9 @@ import { generateLocalEmbedding } from "./local-embedding-provider";
 import type { LLMProviderName } from "@/types";
 
 // Default embedding models per online provider
-const DEFAULT_ONLINE_EMBEDDING_MODELS: Record<LLMProviderName, string> = {
+const DEFAULT_ONLINE_EMBEDDING_MODELS: Partial<Record<LLMProviderName, string>> = {
   openai: "text-embedding-3-small",
-  anthropic: "text-embedding-3-small", // Anthropic doesn't have native embeddings, will fall back to OpenAI
-  gemini: "text-embedding-004",
+  gemini: "gemini-embedding-001",
   ollama: "nomic-embed-text",
 };
 
@@ -17,7 +16,38 @@ const EMBEDDING_SUPPORTED_PROVIDERS: LLMProviderName[] = ["openai", "gemini", "o
 // Fallback order for embedding providers when the active provider doesn't support embeddings
 const EMBEDDING_FALLBACK_ORDER: LLMProviderName[] = ["openai", "gemini", "ollama"];
 
-export async function generateEmbedding(text: string): Promise<number[]> {
+export interface EmbeddingResult {
+  embedding: number[];
+  model: string;
+}
+
+/**
+ * Resolve the current embedding model name without generating an embedding.
+ * Used by the UI to determine which memories are compatible.
+ */
+export function getCurrentEmbeddingModel(): string {
+  const settings = getSettings();
+
+  if (settings.embeddingMode === "local") {
+    return settings.localEmbeddingModel;
+  }
+
+  let effectiveProvider: LLMProviderName = settings.embeddingProviderOverride
+    ? settings.embeddingProvider
+    : settings.activeProvider;
+
+  if (!EMBEDDING_SUPPORTED_PROVIDERS.includes(effectiveProvider)) {
+    for (const fallback of EMBEDDING_FALLBACK_ORDER) {
+      if (fallback === "openai" && settings.openaiApiKey) { effectiveProvider = "openai"; break; }
+      else if (fallback === "gemini" && settings.geminiApiKey) { effectiveProvider = "gemini"; break; }
+      else if (fallback === "ollama") { effectiveProvider = "ollama"; break; }
+    }
+  }
+
+  return DEFAULT_ONLINE_EMBEDDING_MODELS[effectiveProvider] || "nomic-embed-text";
+}
+
+export async function generateEmbedding(text: string): Promise<EmbeddingResult> {
   const settings = getSettings();
 
   // Check if using local embeddings
@@ -35,7 +65,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 async function generateLocalEmbeddingWrapper(
   text: string,
   settings: ReturnType<typeof getSettings>
-): Promise<number[]> {
+): Promise<EmbeddingResult> {
   console.log(
     `[Embedding] Using LOCAL backend: ${settings.localEmbeddingBackend}, model: ${settings.localEmbeddingModel}`
   );
@@ -47,7 +77,7 @@ async function generateLocalEmbeddingWrapper(
     settings.ollamaBaseUrl
   );
 
-  return response.embedding;
+  return { embedding: response.embedding, model: settings.localEmbeddingModel };
 }
 
 /**
@@ -56,7 +86,7 @@ async function generateLocalEmbeddingWrapper(
 async function generateOnlineEmbedding(
   text: string,
   settings: ReturnType<typeof getSettings>
-): Promise<number[]> {
+): Promise<EmbeddingResult> {
   // Resolve the effective embedding provider (follows active provider unless overridden)
   let effectiveProvider: LLMProviderName = settings.embeddingProviderOverride
     ? settings.embeddingProvider
@@ -73,6 +103,10 @@ async function generateOnlineEmbedding(
         // Check if this fallback provider has credentials configured
         if (fallback === "openai" && settings.openaiApiKey) {
           effectiveProvider = "openai";
+          fallbackFound = true;
+          break;
+        } else if (fallback === "anthropic" && settings.anthropicApiKey) {
+          effectiveProvider = "anthropic";
           fallbackFound = true;
           break;
         } else if (fallback === "gemini" && settings.geminiApiKey) {
@@ -100,10 +134,9 @@ async function generateOnlineEmbedding(
     console.log(`[Embedding] Using fallback provider: ${effectiveProvider}`);
   }
 
-  // Use the correct model for the resolved provider
-  const model = settings.embeddingProviderOverride
-    ? settings.embeddingModel
-    : DEFAULT_ONLINE_EMBEDDING_MODELS[effectiveProvider];
+  // Always use the default embedding model for whichever provider we resolved to.
+  // User-configured embeddingModel may be stale from a different provider.
+  const model = DEFAULT_ONLINE_EMBEDDING_MODELS[effectiveProvider] || "nomic-embed-text";
 
   console.log(`[Embedding] Using ONLINE provider: ${effectiveProvider}, model: ${model}`);
 
@@ -113,5 +146,5 @@ async function generateOnlineEmbedding(
     text,
     model,
   });
-  return response.embedding;
+  return { embedding: response.embedding, model };
 }

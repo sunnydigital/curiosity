@@ -118,6 +118,7 @@ export class AnthropicProvider extends BaseLLMProvider {
       temperature: req.temperature ?? 0.7,
     });
 
+    let streamEnded = false;
     for await (const event of stream) {
       if (
         event.type === "content_block_delta" &&
@@ -126,37 +127,19 @@ export class AnthropicProvider extends BaseLLMProvider {
         yield { content: event.delta.text, done: false };
       }
       if (event.type === "message_stop") {
+        streamEnded = true;
         yield { content: "", done: true };
       }
     }
+    if (!streamEnded) {
+      console.warn("[AnthropicProvider] Stream ended without message_stop event");
+      yield { content: "", done: true };
+    }
+    console.log("[AnthropicProvider] Stream generator finished");
   }
 
-  async embed(req: EmbeddingRequest): Promise<EmbeddingResponse> {
-    const model = req.model || "voyage-3-lite";
-    const response = await fetch("https://api.voyageai.com/v1/embeddings", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.client.apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        input: [req.text],
-      }),
-    });
-
-    if (!response.ok) {
-      const err = await response.text();
-      throw new Error(`Voyage AI embeddings error (${response.status}): ${err}`);
-    }
-
-    const data = await response.json();
-    const embedding = data.data[0].embedding;
-
-    return {
-      embedding,
-      dimensions: embedding.length,
-    };
+  async embed(_req: EmbeddingRequest): Promise<EmbeddingResponse> {
+    throw new Error("Anthropic does not provide native embeddings. Use OpenAI, Gemini, or Ollama instead.");
   }
 
 }

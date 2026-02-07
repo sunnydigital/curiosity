@@ -141,7 +141,7 @@ export function MessageInput({
         </div>
       )}
 
-      <div className="mx-auto flex max-w-3xl items-end gap-2">
+      <div className="mx-auto flex max-w-3xl items-stretch gap-2">
         <input
           ref={fileInputRef}
           type="file"
@@ -154,7 +154,7 @@ export function MessageInput({
           size="icon"
           onClick={handleImageClick}
           title="Attach image"
-          className="shrink-0"
+          className="shrink-0 self-stretch h-auto w-10"
         >
           <ImagePlus className="h-4 w-4" />
         </Button>
@@ -169,7 +169,7 @@ export function MessageInput({
           disabled={disabled}
         />
         {isLoading ? (
-          <Button variant="destructive" size="icon" onClick={onStop} className="shrink-0">
+          <Button variant="destructive" size="icon" onClick={onStop} className="shrink-0 self-stretch h-auto w-10">
             <Square className="h-4 w-4" />
           </Button>
         ) : (
@@ -177,7 +177,7 @@ export function MessageInput({
             size="icon"
             onClick={handleSubmit}
             disabled={!content.trim() || disabled}
-            className="shrink-0"
+            className="shrink-0 self-stretch h-auto w-10"
           >
             <Send className="h-4 w-4" />
           </Button>

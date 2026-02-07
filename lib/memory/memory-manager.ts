@@ -28,13 +28,14 @@ export async function onNewExchange(
 
     for (const fact of facts) {
       console.log("[MemoryManager] Generating embedding for:", fact);
-      const embedding = await generateEmbedding(fact);
-      console.log("[MemoryManager] Creating memory with embedding length:", embedding.length);
+      const { embedding, model } = await generateEmbedding(fact);
+      console.log("[MemoryManager] Creating memory with embedding length:", embedding.length, "model:", model);
       createMemory({
         content: fact,
         sourceChatId: chatId,
         sourceMessageId: userMessageId,
         embedding,
+        embeddingModel: model,
       });
       console.log("[MemoryManager] Memory created successfully");
     }

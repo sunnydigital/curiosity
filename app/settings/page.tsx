@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { useTheme } from "@/components/ThemeProvider";
-import { ArrowLeft, Check, Eye, EyeOff, Trash2, LogIn, LogOut, GripVertical, KeyRound, ChevronDown, Loader2 } from "lucide-react";
+import { ArrowLeft, Check, Eye, EyeOff, LogIn, LogOut, GripVertical, KeyRound, ChevronDown, Loader2, Brain, MessageSquare } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -231,6 +231,8 @@ export default function SettingsPage() {
   const [defaultModelFocus, setDefaultModelFocus] = useState<Record<string, boolean>>({});
   const [previewModelFocus, setPreviewModelFocus] = useState<Record<string, boolean>>({});
   const [draggedProvider, setDraggedProvider] = useState<LLMProviderName | null>(null);
+  const [ollamaEmbeddingModels, setOllamaEmbeddingModels] = useState<string[]>([]);
+  const [ollamaEmbeddingConnected, setOllamaEmbeddingConnected] = useState<boolean | null>(null);
 
   // Check for OAuth callback results in URL params
   useEffect(() => {
@@ -379,6 +381,20 @@ export default function SettingsPage() {
         setOllamaConnected(false);
       })
       .finally(() => setOllamaLoading(false));
+  }, []);
+
+  // Fetch Ollama embedding models on mount
+  useEffect(() => {
+    fetch("/api/ollama-models/embedding")
+      .then((r) => r.json())
+      .then((data) => {
+        setOllamaEmbeddingModels(data.models || []);
+        setOllamaEmbeddingConnected(data.connected ?? false);
+      })
+      .catch(() => {
+        setOllamaEmbeddingModels([]);
+        setOllamaEmbeddingConnected(false);
+      });
   }, []);
 
   // Fetch models dynamically for all cloud providers once settings are loaded
@@ -1342,14 +1358,20 @@ export default function SettingsPage() {
                       ]).map(({ mode, label }, idx) => (
                         <button
                           key={mode}
-                          className={`${idx === 0 ? "rounded-l-md" : ""} ${idx === 1 ? "rounded-r-md" : ""} px-2.5 py-1 transition-colors ${
-                            settings.embeddingMode === mode
-                              ? "bg-primary text-primary-foreground"
-                              : "hover:bg-accent"
-                          }`}
+                          className={`${idx === 0 ? "rounded-l-md" : ""} ${idx === 1 ? "rounded-r-md" : ""} px-2.5 py-1 transition-colors ${settings.embeddingMode === mode
+                            ? "bg-primary text-primary-foreground"
+                            : "hover:bg-accent"
+                            }`}
                           onClick={() => {
-                            setSettings({ ...settings, embeddingMode: mode });
-                            persistSettings({ embeddingMode: mode });
+                            if (mode === "local") {
+                              // Force backend to ollama when switching to local
+                              const defaultModel = ollamaEmbeddingModels[0] || settings.localEmbeddingModel || "nomic-embed-text";
+                              setSettings({ ...settings, embeddingMode: mode, localEmbeddingBackend: "ollama", localEmbeddingModel: defaultModel });
+                              persistSettings({ embeddingMode: mode, localEmbeddingBackend: "ollama", localEmbeddingModel: defaultModel });
+                            } else {
+                              setSettings({ ...settings, embeddingMode: mode });
+                              persistSettings({ embeddingMode: mode });
+                            }
                           }}
                         >
                           {label}
@@ -1361,108 +1383,45 @@ export default function SettingsPage() {
 
                 {/* Online Embedding Settings */}
                 {settings.embeddingMode === "online" && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <span>Override active provider</span>
-                          <Switch
-                            checked={settings.embeddingProviderOverride}
-                            onCheckedChange={(checked: boolean) => {
-                              setSettings({ ...settings, embeddingProviderOverride: checked });
-                              persistSettings({ embeddingProviderOverride: checked });
-                            }}
-                          />
-                        </label>
-                      </div>
-                      {settings.embeddingProviderOverride ? (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <button className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm">
-                              <span className="flex items-center gap-2">
-                                <ProviderIcon provider={settings.embeddingProvider} active />
-                                {({ openai: "OpenAI", anthropic: "Anthropic (Voyage AI)", gemini: "Gemini", ollama: "Ollama" } as Record<string, string>)[settings.embeddingProvider]}
-                              </span>
-                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                            </button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)]">
-                            {([["openai", "OpenAI"], ["anthropic", "Anthropic (Voyage AI)"], ["gemini", "Gemini"], ["ollama", "Ollama"]] as [LLMProviderName, string][]).map(([value, label]) => (
-                              <DropdownMenuItem
-                                key={value}
-                                onSelect={() => {
-                                  setSettings({ ...settings, embeddingProvider: value });
-                                  persistSettings({ embeddingProvider: value });
-                                }}
-                                className="flex items-center gap-2"
-                              >
-                                <ProviderIcon provider={value} active={value === settings.embeddingProvider} />
-                                {label}
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      ) : (
-                        <div className="rounded-md border border-input bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
-                          <span className="flex items-center gap-2">
-                            Follows active provider (
-                            <ProviderIcon provider={settings.activeProvider} active />
-                            {({ openai: "OpenAI", anthropic: "Anthropic (Voyage AI)", gemini: "Gemini", ollama: "Ollama" } as Record<string, string>)[settings.activeProvider]})
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm">
+                        <span className="flex items-center gap-2">
+                          <ProviderIcon provider={settings.embeddingProvider} active />
+                          {({ openai: "OpenAI", gemini: "Gemini" } as Record<string, string>)[settings.embeddingProvider] || settings.embeddingProvider}
+                        </span>
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                      {([["openai", "OpenAI"], ["gemini", "Gemini"]] as [LLMProviderName, string][]).map(([value, label]) => (
+                        <DropdownMenuItem
+                          key={value}
+                          onSelect={() => {
+                            setSettings({ ...settings, embeddingProvider: value, embeddingProviderOverride: true });
+                            persistSettings({ embeddingProvider: value, embeddingProviderOverride: true });
+                          }}
+                          className="flex items-center gap-2"
+                        >
+                          <ProviderIcon provider={value} active={value === settings.embeddingProvider} />
+                          {label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
 
-                {/* Local Embedding Settings */}
+                {/* Local Embedding Settings (Ollama only) */}
                 {settings.embeddingMode === "local" && (
                   <div className="space-y-3">
-                    <div>
-                      <label className="mb-1 block text-xs text-muted-foreground">
-                        Local Backend
-                      </label>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm">
-                            <span>
-                              {({
-                                transformers: "Transformers.js (WebGPU/WASM)",
-                                onnx: "ONNX Runtime",
-                                tflite: "TensorFlow Lite",
-                                ollama: "Ollama (Local Server)",
-                              } as Record<LocalEmbeddingBackend, string>)[settings.localEmbeddingBackend]}
-                            </span>
-                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)]">
-                          {([
-                            ["transformers", "Transformers.js (WebGPU/WASM)"],
-                            ["onnx", "ONNX Runtime"],
-                            ["tflite", "TensorFlow Lite"],
-                            ["ollama", "Ollama (Local Server)"],
-                          ] as [LocalEmbeddingBackend, string][]).map(([value, label]) => (
-                            <DropdownMenuItem
-                              key={value}
-                              onSelect={() => {
-                                const models = LOCAL_EMBEDDING_MODELS[value];
-                                const firstModel = models[0]?.id || settings.localEmbeddingModel;
-                                setSettings({ ...settings, localEmbeddingBackend: value, localEmbeddingModel: firstModel });
-                                persistSettings({ localEmbeddingBackend: value, localEmbeddingModel: firstModel });
-                              }}
-                            >
-                              {label}
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      <div className="mt-1 text-[10px] text-muted-foreground">
-                        {settings.localEmbeddingBackend === "transformers" && "Runs in-browser via WebGPU or WASM. No server needed."}
-                        {settings.localEmbeddingBackend === "onnx" && "Requires onnxruntime-node. Best for CPU/GPU inference."}
-                        {settings.localEmbeddingBackend === "tflite" && "Lightweight, mobile-friendly. Requires @tensorflow/tfjs-node."}
-                        {settings.localEmbeddingBackend === "ollama" && "Uses local Ollama server. Make sure Ollama is running."}
-                      </div>
+                    {/* Provider row: Ollama icon + name + connected badge */}
+                    <div className="flex items-center gap-2">
+                      <ProviderIcon provider="ollama" active={ollamaEmbeddingConnected === true} />
+                      <span className="text-sm">Ollama (Local Server)</span>
+                      <OllamaStatusBadge connected={ollamaEmbeddingConnected} />
                     </div>
 
+                    {/* Embedding Model selector */}
                     <div>
                       <label className="mb-1 block text-xs text-muted-foreground">
                         Embedding Model
@@ -1471,18 +1430,21 @@ export default function SettingsPage() {
                         <DropdownMenuTrigger asChild>
                           <button className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm">
                             <span>
-                              {LOCAL_EMBEDDING_MODELS[settings.localEmbeddingBackend]?.find(m => m.id === settings.localEmbeddingModel)?.name || settings.localEmbeddingModel}
+                              {(() => {
+                                const staticModel = LOCAL_EMBEDDING_MODELS.ollama.find(m => m.id === settings.localEmbeddingModel);
+                                return staticModel ? staticModel.name : settings.localEmbeddingModel;
+                              })()}
                             </span>
                             <ChevronDown className="h-4 w-4 text-muted-foreground" />
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)]">
-                          {LOCAL_EMBEDDING_MODELS[settings.localEmbeddingBackend]?.map((model) => (
+                          {LOCAL_EMBEDDING_MODELS.ollama.map((model) => (
                             <DropdownMenuItem
                               key={model.id}
                               onSelect={() => {
-                                setSettings({ ...settings, localEmbeddingModel: model.id });
-                                persistSettings({ localEmbeddingModel: model.id });
+                                setSettings({ ...settings, localEmbeddingBackend: "ollama", localEmbeddingModel: model.id });
+                                persistSettings({ localEmbeddingBackend: "ollama", localEmbeddingModel: model.id });
                               }}
                             >
                               <div className="flex flex-col">
@@ -1493,28 +1455,21 @@ export default function SettingsPage() {
                           ))}
                         </DropdownMenuContent>
                       </DropdownMenu>
-                    </div>
-
-                    {settings.localEmbeddingBackend === "ollama" && (
-                      <div className="rounded-md border border-border bg-muted/30 p-2 text-xs text-muted-foreground">
-                        <div className="flex items-center gap-2">
-                          <ProviderIcon provider="ollama" active={ollamaConnected === true} />
-                          <span>Ollama: </span>
-                          <OllamaStatusBadge connected={ollamaConnected} />
+                      {ollamaEmbeddingConnected === false && (
+                        <div className="mt-1.5 text-[10px] text-muted-foreground">
+                          Run <code className="rounded bg-muted px-1">ollama serve</code> and <code className="rounded bg-muted px-1">ollama pull {settings.localEmbeddingModel}</code>
                         </div>
-                        {ollamaConnected === false && (
-                          <div className="mt-1">
-                            Run <code className="rounded bg-muted px-1">ollama serve</code> and <code className="rounded bg-muted px-1">ollama pull {settings.localEmbeddingModel}</code>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 )}
 
                 <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="mb-1 block text-xs text-muted-foreground">
+                    <label
+                      className="mb-1 block text-xs text-muted-foreground cursor-help"
+                      title="Controls how quickly memory relevance fades over time. Higher values cause memories to decay faster, while lower values keep memories relevant longer."
+                    >
                       Decay Lambda
                     </label>
                     <Input
@@ -1531,7 +1486,10 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs text-muted-foreground">
+                    <label
+                      className="mb-1 block text-xs text-muted-foreground cursor-help"
+                      title="How much semantic similarity influences memory retrieval scoring. Higher values prioritize memories whose content closely matches the current query."
+                    >
                       Similarity Weight
                     </label>
                     <Input
@@ -1550,7 +1508,10 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs text-muted-foreground">
+                    <label
+                      className="mb-1 block text-xs text-muted-foreground cursor-help"
+                      title="How much recency influences memory retrieval scoring. Higher values favor recently created or accessed memories over older ones."
+                    >
                       Temporal Weight
                     </label>
                     <Input
@@ -1582,7 +1543,7 @@ export default function SettingsPage() {
           <div className="space-y-3 rounded-md border border-destructive/30 p-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Clear All Credentials</div>
+                <div className="text-sm font-medium">Clear Credentials</div>
                 <div className="text-xs text-muted-foreground">
                   Remove all API keys, OAuth tokens, and setup tokens.
                 </div>
@@ -1608,12 +1569,42 @@ export default function SettingsPage() {
                 }}
               >
                 <KeyRound className="mr-2 h-4 w-4" />
-                Clear Credentials
+                Clear All
               </Button>
             </div>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Clear All Chats</div>
+                <div className="text-sm font-medium">Clear Memories</div>
+                <div className="text-xs text-muted-foreground">
+                  Permanently delete all stored memories. This cannot be undone.
+                </div>
+              </div>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={async () => {
+                  if (!confirm("Are you sure you want to delete ALL memories? This cannot be undone.")) return;
+                  try {
+                    const res = await fetch("/api/memory", {
+                      method: "DELETE",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ all: true }),
+                    });
+                    if (!res.ok) throw new Error("Failed to clear memories");
+                    setSaved(true);
+                    setTimeout(() => setSaved(false), 2000);
+                  } catch (e: any) {
+                    setError(e.message);
+                  }
+                }}
+              >
+                <Brain className="mr-2 h-4 w-4" />
+                Clear All
+              </Button>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">Clear Chats</div>
                 <div className="text-xs text-muted-foreground">
                   Permanently delete all chat history. This cannot be undone.
                 </div>
@@ -1633,7 +1624,7 @@ export default function SettingsPage() {
                   }
                 }}
               >
-                <Trash2 className="mr-2 h-4 w-4" />
+                <MessageSquare className="mr-2 h-4 w-4" />
                 Clear All
               </Button>
             </div>

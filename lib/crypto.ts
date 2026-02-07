@@ -1,18 +1,41 @@
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 
+const KEY_FILE = path.join(process.cwd(), ".curiosity-key");
+
+let cachedKey: Buffer | null = null;
+
+/**
+ * Resolve the encryption key. Priority:
+ * 1. CURIOSITY_ENCRYPTION_KEY env var (if set)
+ * 2. Auto-generated key persisted in .curiosity-key file
+ */
 function getEncryptionKey(): Buffer {
-  const key = process.env.CURIOSITY_ENCRYPTION_KEY;
-  if (!key) {
-    throw new Error(
-      "CURIOSITY_ENCRYPTION_KEY environment variable is required. " +
-        "Please set it to a secure random string (64+ characters recommended)."
-    );
+  if (cachedKey) return cachedKey;
+
+  let raw = process.env.CURIOSITY_ENCRYPTION_KEY;
+
+  if (!raw) {
+    // Try to read a previously-generated key from disk
+    if (fs.existsSync(KEY_FILE)) {
+      raw = fs.readFileSync(KEY_FILE, "utf-8").trim();
+    }
+
+    // If still nothing, generate a new key and persist it
+    if (!raw) {
+      raw = crypto.randomBytes(32).toString("hex");
+      fs.writeFileSync(KEY_FILE, raw, { mode: 0o600 });
+      console.log("[Crypto] Auto-generated encryption key → .curiosity-key");
+    }
   }
-  return crypto.scryptSync(key, "curiosity-salt", 32);
+
+  cachedKey = crypto.scryptSync(raw, "curiosity-salt", 32);
+  return cachedKey;
 }
 
 export function encrypt(text: string): string {
