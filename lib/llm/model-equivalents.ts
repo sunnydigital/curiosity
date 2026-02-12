@@ -7,32 +7,32 @@ import type { LLMProviderName } from "@/types";
  */
 export const MODEL_TIER_MAP: Record<string, Record<LLMProviderName, string>> = {
   flagship: {
-    openai: "gpt-5",
-    anthropic: "claude-opus-4-5-20251101",
-    gemini: "gemini-2.5-pro",
-    ollama: "llama3.2",
+    openai: "gpt-5.2-pro",
+    anthropic: "claude-opus-4-6",
+    gemini: "gemini-3-pro-preview",
+    ollama: "qwen3-vl:30b",
   },
   fast: {
     openai: "gpt-5-mini",
-    anthropic: "claude-sonnet-4-5-20250929",
-    gemini: "gemini-2.5-flash",
-    ollama: "llama3.2",
+    anthropic: "claude-haiku-4-5",
+    gemini: "gemini-3-flash-preview",
+    ollama: "qwen3-vl:30b",
   },
   mini: {
     openai: "gpt-5-nano",
     anthropic: "claude-haiku-4-5-20251001",
     gemini: "gemini-2.5-flash-lite",
-    ollama: "llama3.2",
+    ollama: "qwen3-vl:30b",
   },
 };
 
 // Default model per provider (used when no tier match is found).
 // Safe for client-side import — no pi-ai dependency.
 export const DEFAULT_MODELS: Record<LLMProviderName, string> = {
-  openai: "gpt-5-mini",
-  anthropic: "claude-sonnet-4-5-20250929",
-  gemini: "gemini-2.5-flash",
-  ollama: "llama3.2",
+  openai: "gpt-5.2-pro",
+  anthropic: "claude-opus-4-6",
+  gemini: "gemini-3-pro-preview",
+  ollama: "qwen3-vl:30b",
 };
 
 /**

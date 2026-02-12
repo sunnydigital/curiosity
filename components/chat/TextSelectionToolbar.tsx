@@ -240,6 +240,7 @@ export function TextSelectionToolbar({
 
   return (
     <div
+      data-selection-toolbar
       className="fixed z-50 flex flex-col gap-1 rounded-lg border bg-popover p-1 shadow-lg"
       style={{
         left: `${position.x}px`,

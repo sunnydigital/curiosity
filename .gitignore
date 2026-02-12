@@ -34,3 +34,6 @@ next-env.d.ts
 *.db-journal
 *.db-wal
 *.db-shm
+
+#claude
+/.claude/
