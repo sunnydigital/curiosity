@@ -36,4 +36,6 @@ next-env.d.ts
 *.db-shm
 
 #claude
+.claude/
 /.claude/
+/.claude/*
