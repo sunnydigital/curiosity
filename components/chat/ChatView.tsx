@@ -28,7 +28,7 @@ function modelSupportsImages(provider: string, model: string): boolean {
   if (provider === "anthropic" || provider === "gemini") return true;
   // OpenAI: GPT-4o, GPT-4-turbo, and o-series support vision; GPT-3.5 does not
   if (provider === "openai") {
-    return /gpt-4o|gpt-4-turbo|o1|o3|o4/i.test(model);
+    return /gpt-5|gpt-4o|gpt-4-turbo|o1|o3|o4/i.test(model);
   }
   // Ollama: check base name (before the colon/tag) against known vision models
   if (provider === "ollama") {
@@ -220,6 +220,21 @@ export function ChatView({ chatId }: ChatViewProps) {
         }
       }
     }
+  }, [selectionState]);
+
+  // Clear selection state on mousedown so the previous highlight doesn't
+  // interfere with a new selection the user is about to make.
+  useEffect(() => {
+    if (!selectionState) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      // Don't clear if the click is inside the toolbar (it uses preventDefault)
+      const toolbar = document.querySelector("[data-selection-toolbar]");
+      if (toolbar && toolbar.contains(e.target as Node)) return;
+      selectionRangeRef.current = null;
+      setSelectionState(null);
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
   }, [selectionState]);
 
   const handleBranch = async (
