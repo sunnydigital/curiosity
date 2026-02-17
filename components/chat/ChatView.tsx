@@ -100,6 +100,18 @@ export function ChatView({ chatId }: ChatViewProps) {
       .catch(() => {});
   }, [fetchMessages, chatId]);
 
+  // Re-fetch chat title when auto-title is generated
+  useEffect(() => {
+    const handleTitleRefresh = () => {
+      fetch(`/api/chat/${chatId}`)
+        .then((r) => r.json())
+        .then((data) => { if (data?.title) setChatTitle(data.title); })
+        .catch(() => {});
+    };
+    window.addEventListener("refresh-sidebar", handleTitleRefresh);
+    return () => window.removeEventListener("refresh-sidebar", handleTitleRefresh);
+  }, [chatId]);
+
   // Listen for tree/memory toggle buttons in TopBar
   useEffect(() => {
     const treeBtn = document.getElementById("tree-toggle-btn");

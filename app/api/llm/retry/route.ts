@@ -159,7 +159,7 @@ export async function POST(request: NextRequest) {
               model: settings.previewModel,
               messages: titleMessages,
               temperature: 0.7,
-              maxTokens: 30,
+              maxTokens: 500,
             });
             title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
           } catch {
@@ -169,7 +169,7 @@ export async function POST(request: NextRequest) {
                 model: settings.activeModel,
                 messages: titleMessages,
                 temperature: 0.7,
-                maxTokens: 30,
+                maxTokens: 500,
               });
               title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
             } catch {

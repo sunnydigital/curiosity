@@ -81,9 +81,14 @@ export async function POST(request: NextRequest) {
           )
         );
 
-        // Auto-title chat early (before streaming) so the sidebar updates immediately
+        // Check if we need to auto-title after streaming
         const chat = getChat(chatId);
-        if (chat && chat.title === "New Chat") {
+        const needsAutoTitle = chat && chat.title === "New Chat";
+
+        // For non-Ollama providers, generate title early so sidebar updates immediately.
+        // For Ollama, defer until after streaming to avoid blocking (Ollama handles
+        // one request at a time, so a pre-stream complete() would stall the response).
+        if (needsAutoTitle && settings.activeProvider !== "ollama") {
           const titleMessages: LLMMessage[] = [
             {
               role: "user",
@@ -129,7 +134,6 @@ export async function POST(request: NextRequest) {
         let actualProvider = settings.activeProvider;
         let actualModel = settings.activeModel;
         let gen: AsyncGenerator<{ content: string; done: boolean }, void, unknown>;
-
 
         if (settings.failoverEnabled && settings.failoverChain.length > 0) {
           // Use failover executor
@@ -206,6 +210,50 @@ export async function POST(request: NextRequest) {
             })}\n\n`
           )
         );
+
+        // For Ollama, generate title after streaming so we don't block the response
+        if (needsAutoTitle && settings.activeProvider === "ollama") {
+          const titleMessages: LLMMessage[] = [
+            {
+              role: "user",
+              content: `Generate a short title (3-6 words) for the following conversation. Return ONLY the title text, nothing else.\n\nUser: ${content}\nAssistant: ${fullContent.slice(0, 500)}`,
+            },
+          ];
+
+          let title = "";
+          try {
+            const titleProvider = await getPreviewProviderAsync(settings);
+            const r = await titleProvider.complete({
+              model: settings.previewModel,
+              messages: titleMessages,
+              temperature: 0.7,
+              maxTokens: 500,
+            });
+            title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
+          } catch {
+            try {
+              const fallbackProvider = await getProviderAsync(settings.activeProvider, settings);
+              const r = await fallbackProvider.complete({
+                model: settings.activeModel,
+                messages: titleMessages,
+                temperature: 0.7,
+                maxTokens: 500,
+              });
+              title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
+            } catch {
+              // Title generation is best-effort
+            }
+          }
+
+          if (title) {
+            renameChat(chatId, title);
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ type: "title_updated", title })}\n\n`
+              )
+            );
+          }
+        }
 
         // Extract facts for memory — await so it completes before the stream closes
         try {

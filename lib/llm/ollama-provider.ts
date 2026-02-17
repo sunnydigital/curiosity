@@ -52,8 +52,14 @@ export class OllamaProvider extends BaseLLMProvider {
 
     const data = await response.json();
     console.log(`[OllamaProvider] Success, model used: ${data.model}`);
+    // Thinking models (qwen3, etc.) may put all output in `thinking` with empty `content`.
+    // Fall back to the thinking field so callers always get usable output.
+    let content = data.message?.content || "";
+    if (!content && data.message?.thinking) {
+      content = data.message.thinking;
+    }
     return {
-      content: data.message?.content || "",
+      content,
       model: data.model,
       provider: "ollama",
       usage: data.eval_count
