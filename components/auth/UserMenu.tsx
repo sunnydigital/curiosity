@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { User, LogIn, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,13 +28,15 @@ interface AuthInfo {
 export function UserMenu() {
   const [auth, setAuth] = useState<AuthInfo | null>(null);
   const router = useRouter();
+  const pathname = usePathname();
 
+  // Re-fetch auth on mount and whenever the route changes (e.g. after login redirect)
   useEffect(() => {
     fetch("/api/auth/me")
       .then((r) => r.json())
       .then(setAuth)
       .catch(() => {});
-  }, []);
+  }, [pathname]);
 
   const handleSignOut = async () => {
     await fetch("/api/auth/signout", { method: "POST" });

@@ -39,8 +39,8 @@ export default function LoginPage() {
         try {
           await fetch('/api/auth/migrate', { method: 'POST' });
         } catch {}
-        router.push("/");
-        router.refresh();
+        // Use window.location for full page reload to ensure auth cookie is set
+        window.location.href = "/";
       }
     } catch (err: any) {
       setError(err.message);

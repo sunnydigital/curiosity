@@ -614,7 +614,7 @@ export default function SettingsPage() {
                     <OllamaStatusBadge connected={ollamaConnected} />
                   ) : (
                     <ConnectionBadge
-                      hasApiKey={!!(settings as any)[p.keyField]}
+                      hasApiKey={!!userApiKeys[p.name]}
                       hasOAuth={!!oauthStatus[p.name]?.connected}
                       tier={oauthStatus[p.name]?.tier || null}
                       authMode={getAuthMode(p.name)}
@@ -855,7 +855,7 @@ export default function SettingsPage() {
                               <OllamaStatusBadge connected={ollamaConnected} />
                             ) : (
                               <ConnectionBadge
-                                hasApiKey={!!(settings as any)[p.keyField]}
+                                hasApiKey={!!userApiKeys[p.name]}
                                 hasOAuth={!!oauthStatus[p.name]?.connected}
                                 tier={oauthStatus[p.name]?.tier || null}
                                 authMode={getAuthMode(p.name)}
