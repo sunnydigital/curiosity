@@ -15,6 +15,7 @@ import { useTheme } from "@/components/ThemeProvider";
 import { ProviderSwitcher } from "@/components/chat/ProviderSwitcher";
 import { UserMenu } from "@/components/auth/UserMenu";
 import { DEFAULT_MODELS } from "@/lib/llm/model-equivalents";
+import { useOllama } from "@/hooks/useOllama";
 import type { LLMProviderName, Settings } from "@/types";
 
 export function TopBar() {
@@ -22,6 +23,7 @@ export function TopBar() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const { theme, toggleTheme } = useTheme();
   const pathname = usePathname();
+  const ollama = useOllama();
 
   const fetchSettings = useCallback(() => {
     fetch("/api/settings")
@@ -93,8 +95,13 @@ export function TopBar() {
             />
           )}
           {isAuthenticated && (
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs text-muted-foreground flex items-center gap-1.5">
               {settings?.activeModel}
+              {settings?.activeProvider === "ollama" && ollama.permitted && ollama.isAvailable && (
+                <span className="inline-flex items-center rounded-full border border-green-300 bg-green-100 px-1.5 py-0 text-[10px] font-medium text-green-700">
+                  Connected
+                </span>
+              )}
             </span>
           )}
         </div>

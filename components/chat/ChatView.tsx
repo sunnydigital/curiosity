@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useChat } from "@/hooks/useChat";
+import { useOllama } from "@/hooks/useOllama";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
@@ -61,6 +62,7 @@ export function ChatView({ chatId }: ChatViewProps) {
     setActivePath,
   } = useChat({ chatId });
 
+  const ollama = useOllama();
   const scrollRef = useRef<HTMLDivElement>(null);
   const selectionRangeRef = useRef<Range | null>(null);
   const [showTree, setShowTree] = useState(false);
@@ -505,7 +507,10 @@ export function ChatView({ chatId }: ChatViewProps) {
         <MessageInput
           onSend={(content, image) => {
             const lastMessage = displayMessages[displayMessages.length - 1];
-            sendMessage(content, lastMessage?.id || null, image);
+            const ollamaOpts = activeProvider === "ollama" && ollama.permitted && ollama.isAvailable
+              ? { baseUrl: ollama.baseUrl, model: activeModel }
+              : undefined;
+            sendMessage(content, lastMessage?.id || null, image, ollamaOpts);
           }}
           onStop={stopStreaming}
           isLoading={isLoading}

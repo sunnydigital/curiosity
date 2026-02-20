@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { Message, FailoverEvent, LLMProviderName } from "@/types";
+import { streamOllamaChat } from "@/lib/llm/ollama-client";
 
 interface UseChatOptions {
   chatId: string;
@@ -114,7 +115,7 @@ export function useChat({ chatId }: UseChatOptions) {
   );
 
   const sendMessage = useCallback(
-    async (content: string, parentId?: string | null, image?: File) => {
+    async (content: string, parentId?: string | null, image?: File, ollamaOptions?: { baseUrl: string; model: string }) => {
       setIsLoading(true);
       setStreamingContent("");
       streamingContentRef.current = "";
@@ -132,6 +133,67 @@ export function useChat({ chatId }: UseChatOptions) {
             new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
           );
           imageData = { base64, mimeType: image.type };
+        }
+
+        if (ollamaOptions) {
+          // Client-side Ollama streaming: save user message via API, stream from localhost, save assistant message via API
+          const resolvedParentId = parentId || getLastMessageId();
+
+          // Save user message to DB
+          const userMsgRes = await fetch(`/api/chat/${chatId}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content, parentId: resolvedParentId, saveOnly: true }),
+          });
+          const userMessage = await userMsgRes.json();
+          setMessages((prev) => [...prev, userMessage]);
+          lastUserMessageIdRef.current = userMessage.id;
+
+          // Build context: fetch path to root for this user message
+          const contextRes = await fetch(`/api/chat/${chatId}/messages`);
+          const allMessages = await contextRes.json();
+          // Build path from root to user message
+          const pathMessages: { role: string; content: string }[] = [];
+          let cur = allMessages.find((m: any) => m.id === userMessage.id);
+          const chain: any[] = [];
+          while (cur) {
+            chain.unshift(cur);
+            cur = cur.parentId ? allMessages.find((m: any) => m.id === cur.parentId) : null;
+          }
+          for (const m of chain) {
+            pathMessages.push({ role: m.role, content: m.content });
+          }
+
+          // Stream from local Ollama
+          let fullContent = "";
+          for await (const chunk of streamOllamaChat({
+            baseUrl: ollamaOptions.baseUrl,
+            model: ollamaOptions.model,
+            messages: pathMessages,
+          })) {
+            if (abortRef.current?.signal.aborted) break;
+            fullContent += chunk;
+            streamingContentRef.current += chunk;
+            setStreamingContent((prev) => prev + chunk);
+          }
+
+          // Save assistant message to DB
+          const assistantRes = await fetch(`/api/chat/${chatId}/messages/partial`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: fullContent,
+              parentId: userMessage.id,
+              provider: "ollama",
+              model: ollamaOptions.model,
+            }),
+          });
+          const assistantMessage = await assistantRes.json();
+          setMessages((prev) => [...prev, assistantMessage]);
+          setStreamingContent("");
+          streamingContentRef.current = "";
+
+          return;
         }
 
         const response = await fetch("/api/llm/stream", {
@@ -175,10 +237,6 @@ export function useChat({ chatId }: UseChatOptions) {
                 setMessages((prev) => [...prev, event.message]);
                 setStreamingContent("");
                 streamingContentRef.current = "";
-                // Handle failback model changes
-                if (event.actualProvider && event.actualModel) {
-                  handleFailbackModelChange(event.actualProvider, event.actualModel);
-                }
                 // Handle failback model changes
                 if (event.actualProvider && event.actualModel) {
                   handleFailbackModelChange(event.actualProvider, event.actualModel);

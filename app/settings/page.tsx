@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { useTheme } from "@/components/ThemeProvider";
-import { ArrowLeft, Check, Eye, EyeOff, LogIn, LogOut, GripVertical, KeyRound, ChevronDown, Loader2, Brain, MessageSquare } from "lucide-react";
+import { ArrowLeft, Check, Eye, EyeOff, LogIn, LogOut, GripVertical, KeyRound, ChevronDown, Loader2, Brain, MessageSquare, Wifi, WifiOff } from "lucide-react";
+import { useOllama } from "@/hooks/useOllama";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -220,9 +221,10 @@ export default function SettingsPage() {
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
-  const [ollamaLoading, setOllamaLoading] = useState(false);
-  const [ollamaConnected, setOllamaConnected] = useState<boolean | null>(null);
+  const ollama = useOllama();
+  const ollamaModels = ollama.models;
+  const ollamaLoading = ollama.isLoading;
+  const ollamaConnected = ollama.permitted ? (ollama.isAvailable ? true : false) : null;
   const [oauthStatus, setOauthStatus] = useState<OAuthStatusMap>({});
   const [oauthMessage, setOauthMessage] = useState<string | null>(null);
   const [dynamicModels, setDynamicModels] = useState<Record<string, string[]>>({});
@@ -396,22 +398,7 @@ export default function SettingsPage() {
     return () => window.removeEventListener("provider-switched", handler);
   }, []);
 
-  // Always fetch Ollama models on mount (needed for default taskbar model dropdown)
-  useEffect(() => {
-    setOllamaLoading(true);
-    fetch("/api/ollama-models")
-      .then((r) => r.json())
-      .then((data) => {
-        const models = data.models || [];
-        setOllamaModels(models);
-        setOllamaConnected(models.length > 0);
-      })
-      .catch(() => {
-        setOllamaModels([]);
-        setOllamaConnected(false);
-      })
-      .finally(() => setOllamaLoading(false));
-  }, []);
+  // Ollama detection is now handled by the useOllama hook (client-side, permission-based)
 
   // Fetch Ollama embedding models on mount
   useEffect(() => {
@@ -1329,23 +1316,75 @@ export default function SettingsPage() {
               );
             })}
 
-            {/* Ollama (no auth needed) */}
+            {/* Ollama (local, permission-based detection) */}
             <div className="rounded-md border border-border p-3">
               <div className="mb-2 flex items-center gap-2 text-sm font-medium">
                 <span>Ollama (Local)</span>
                 <OllamaStatusBadge connected={ollamaConnected} />
               </div>
-              <Input
-                value={apiKeys.ollamaBaseUrl ?? settings.ollamaBaseUrl}
-                onChange={(e) =>
-                  setApiKeys({ ...apiKeys, ollamaBaseUrl: e.target.value })
-                }
-                onBlur={() => {
-                  const url = apiKeys.ollamaBaseUrl ?? settings.ollamaBaseUrl;
-                  if (url) persistSettings({ ollamaBaseUrl: url });
-                }}
-                placeholder="http://localhost:11434"
-              />
+
+              {!ollama.permitted ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Curiosity will check if Ollama is running on your machine (localhost:11434). This stays entirely on your device.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => ollama.allow()}
+                    className="gap-1.5"
+                  >
+                    <Wifi className="h-3.5 w-3.5" />
+                    Detect Local Ollama
+                  </Button>
+                </div>
+              ) : ollama.isLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Checking for Ollama...
+                </div>
+              ) : ollama.isAvailable ? (
+                <div className="space-y-2">
+                  <div className="text-xs text-muted-foreground">
+                    {ollama.models.length} model{ollama.models.length !== 1 ? "s" : ""} available
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => ollama.revoke()}
+                    className="gap-1.5 text-xs text-muted-foreground"
+                  >
+                    <WifiOff className="h-3.5 w-3.5" />
+                    Disconnect
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Ollama not detected. Make sure Ollama is running on your machine.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => ollama.recheck()}
+                      className="gap-1.5 text-xs"
+                    >
+                      <Wifi className="h-3.5 w-3.5" />
+                      Retry
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => ollama.revoke()}
+                      className="gap-1.5 text-xs text-muted-foreground"
+                    >
+                      <WifiOff className="h-3.5 w-3.5" />
+                      Disconnect
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </section>

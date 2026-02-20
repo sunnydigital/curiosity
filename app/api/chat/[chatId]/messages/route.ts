@@ -21,7 +21,20 @@ export async function POST(
 ) {
   const { chatId } = await params;
   const body = await request.json();
-  const { content, parentId } = body;
+  const { content, parentId, saveOnly } = body;
+
+  // saveOnly: just persist the user message without triggering LLM completion
+  // Used by client-side Ollama streaming path
+  if (saveOnly) {
+    const userMessage = await createMessage({
+      chatId,
+      parentId: parentId || null,
+      role: "user",
+      content,
+    });
+    await touchChat(chatId);
+    return NextResponse.json(userMessage);
+  }
 
   const userMessage = await createMessage({
     chatId,

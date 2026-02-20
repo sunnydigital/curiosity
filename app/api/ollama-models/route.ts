@@ -1,16 +1,11 @@
 import { NextResponse } from "next/server";
-import { getSettingsAsync } from "@/db/queries/settings";
 
+// Ollama detection now happens client-side via the useOllama hook.
+// The server (Vercel) cannot reach localhost:11434.
+// This endpoint returns an empty list with a flag for backwards compatibility.
 export async function GET() {
-  try {
-    const settings = await getSettingsAsync();
-    const baseUrl = settings.ollamaBaseUrl.replace(/\/$/, "");
-    const res = await fetch(`${baseUrl}/api/tags`);
-    if (!res.ok) return NextResponse.json({ models: [] });
-    const data = await res.json();
-    const models: string[] = (data.models || []).map((m: any) => m.name);
-    return NextResponse.json({ models });
-  } catch {
-    return NextResponse.json({ models: [] });
-  }
+  return NextResponse.json({
+    models: [],
+    clientSideDetection: true,
+  });
 }
