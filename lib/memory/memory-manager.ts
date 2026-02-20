@@ -5,7 +5,7 @@ import {
   retrieveRelevantMemories,
   formatMemoriesForContext,
 } from "./memory-retrieval";
-import { getSettings } from "@/db/queries/settings";
+import { getSettingsAsync } from "@/db/queries/settings";
 
 export async function onNewExchange(
   chatId: string,
@@ -13,7 +13,7 @@ export async function onNewExchange(
   userContent: string,
   assistantContent: string
 ): Promise<void> {
-  const settings = getSettings();
+  const settings = await getSettingsAsync();
   console.log("[MemoryManager] onNewExchange called, memoryEnabled:", settings.memoryEnabled);
 
   if (!settings.memoryEnabled) {
@@ -30,7 +30,7 @@ export async function onNewExchange(
       console.log("[MemoryManager] Generating embedding for:", fact);
       const { embedding, model } = await generateEmbedding(fact);
       console.log("[MemoryManager] Creating memory with embedding length:", embedding.length, "model:", model);
-      createMemory({
+      await createMemory({
         content: fact,
         sourceChatId: chatId,
         sourceMessageId: userMessageId,
@@ -47,7 +47,7 @@ export async function onNewExchange(
 export async function getMemoryContext(
   currentMessage: string
 ): Promise<string | null> {
-  const settings = getSettings();
+  const settings = await getSettingsAsync();
   if (!settings.memoryEnabled) return null;
 
   try {

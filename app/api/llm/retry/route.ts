@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getSettings } from "@/db/queries/settings";
+import { getSettingsAsync } from "@/db/queries/settings";
 import { getProviderAsync, getPreviewProviderAsync } from "@/lib/llm/provider-registry";
 import { FailoverExecutor } from "@/lib/llm/failover";
 import { getMessage, createMessage, getPathToRoot } from "@/db/queries/messages";
@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { userMessageId } = body;
 
-  const userMessage = getMessage(userMessageId);
+  const userMessage = await getMessage(userMessageId);
   if (!userMessage) {
     return new Response(JSON.stringify({ error: "Message not found" }), {
       status: 404,
@@ -27,18 +27,14 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  touchChat(userMessage.chatId);
+  await touchChat(userMessage.chatId);
+  const settings = await getSettingsAsync();
+  const contextMessages = await getPathToRoot(userMessage.id);
 
-  const settings = getSettings();
-
-  const contextMessages = getPathToRoot(userMessage.id);
-
-  // Build LLM messages with memory context
   const llmMessages: LLMMessage[] = [
     { role: "system", content: DEFAULT_SYSTEM_PROMPT },
   ];
 
-  // Inject memory context if enabled
   try {
     const memoryContext = await getMemoryContext(userMessage.content);
     if (memoryContext) {
@@ -68,27 +64,15 @@ export async function POST(request: NextRequest) {
           const executor = new FailoverExecutor({
             settings,
             onFailover: (evt: FailoverEvent) => {
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify(evt)}\n\n`
-                )
-              );
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(evt)}\n\n`));
             },
           });
 
-          const gen = executor.stream({
-            model: settings.activeModel,
-            messages: llmMessages,
-          });
-
+          const gen = executor.stream({ model: settings.activeModel, messages: llmMessages });
           for await (const chunk of gen) {
             if (chunk.content) {
               fullContent += chunk.content;
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({ type: "chunk", content: chunk.content })}\n\n`
-                )
-              );
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "chunk", content: chunk.content })}\n\n`));
             }
             if (chunk.done) {
               actualProvider = executor.actualProvider;
@@ -98,24 +82,16 @@ export async function POST(request: NextRequest) {
           }
         } else {
           const provider = await getProviderAsync(settings.activeProvider, settings);
-          const gen = provider.stream({
-            model: settings.activeModel,
-            messages: llmMessages,
-          });
-
+          const gen = provider.stream({ model: settings.activeModel, messages: llmMessages });
           for await (const chunk of gen) {
             if (chunk.content) {
               fullContent += chunk.content;
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({ type: "chunk", content: chunk.content })}\n\n`
-                )
-              );
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "chunk", content: chunk.content })}\n\n`));
             }
           }
         }
 
-        const assistantMessage = createMessage({
+        const assistantMessage = await createMessage({
           chatId: userMessage.chatId,
           parentId: userMessage.id,
           role: "assistant",
@@ -124,40 +100,22 @@ export async function POST(request: NextRequest) {
           model: actualModel,
         });
 
-        controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({
-              type: "done",
-              message: assistantMessage,
-              actualProvider,
-              actualModel
-            })}\n\n`
-          )
-        );
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done", message: assistantMessage, actualProvider, actualModel })}\n\n`));
 
-        // Extract facts for memory — await so it completes before the stream closes
         try {
           await onNewExchange(userMessage.chatId, userMessage.id, userMessage.content, fullContent);
         } catch (err) {
           console.error("[Retry] Memory extraction failed:", err);
         }
 
-        // Auto-title chat if it's the first exchange
-        const chat = getChat(userMessage.chatId);
+        const chat = await getChat(userMessage.chatId);
         if (chat && chat.title === "New Chat") {
-          const titleMessages: LLMMessage[] = [
-            {
-              role: "user",
-              content: `Generate a short title (3-6 words) for the following conversation. Return only the title, no quotes or punctuation.\n\nUser: ${userMessage.content}\nAssistant: ${fullContent.slice(0, 500)}`,
-            },
-          ];
-
           let title = "";
           try {
             const titleProvider = await getPreviewProviderAsync(settings);
             const r = await titleProvider.complete({
               model: settings.previewModel,
-              messages: titleMessages,
+              messages: [{ role: "user", content: `Generate a short title (3-6 words) for the following conversation. Return only the title.\n\nUser: ${userMessage.content}\nAssistant: ${fullContent.slice(0, 500)}` }],
               temperature: 0.7,
               maxTokens: 500,
             });
@@ -167,59 +125,28 @@ export async function POST(request: NextRequest) {
               const fallbackProvider = await getProviderAsync(settings.activeProvider, settings);
               const r = await fallbackProvider.complete({
                 model: settings.activeModel,
-                messages: titleMessages,
-                temperature: 0.7,
-                maxTokens: 500,
+                messages: [{ role: "user", content: `Generate a short title (3-6 words). Return only the title.\n\nUser: ${userMessage.content}` }],
+                temperature: 0.7, maxTokens: 30,
               });
               title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
-            } catch {
-              // Title generation is best-effort
-            }
+            } catch {}
           }
-
           if (title) {
-            renameChat(userMessage.chatId, title);
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({ type: "title_updated", title })}\n\n`
-              )
-            );
+            await renameChat(userMessage.chatId, title);
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "title_updated", title })}\n\n`));
           }
         }
 
         controller.close();
       } catch (error: any) {
-        // Extract a readable error message from various error formats
-        let errorMessage = "An unexpected error occurred";
-
-        // Handle SDK errors (Anthropic, OpenAI) with status + nested error body
-        if (error.status && error.error?.message) {
-          errorMessage = `${error.error.message} (${error.status})`;
-        } else if (error.status && error.message) {
-          errorMessage = `${error.message}`;
-        } else if (error.error?.message) {
-          errorMessage = error.error.message;
-        } else if (error.message) {
-          errorMessage = error.message;
-        } else if (typeof error === "string") {
-          errorMessage = error;
-        }
-
-        controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({ type: "error", error: errorMessage })}\n\n`
-          )
-        );
+        let errorMessage = error.error?.message || error.message || "An unexpected error occurred";
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", error: errorMessage })}\n\n`));
         controller.close();
       }
     },
   });
 
   return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
+    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" },
   });
 }

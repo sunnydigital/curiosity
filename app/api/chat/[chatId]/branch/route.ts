@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { createMessage, getPathToRoot } from "@/db/queries/messages";
 import { touchChat } from "@/db/queries/chats";
-import { getSettings } from "@/db/queries/settings";
+import { getSettingsAsync } from "@/db/queries/settings";
 import { getProviderAsync } from "@/lib/llm/provider-registry";
 import { FailoverExecutor } from "@/lib/llm/failover";
 import { BRANCH_PROMPTS, DEFAULT_SYSTEM_PROMPT } from "@/lib/constants";
@@ -22,8 +22,7 @@ export async function POST(
 
   const branchContent = promptPrefix + (body.selectedText || "");
 
-  // Create the branch root message
-  const branchRoot = createMessage({
+  const branchRoot = await createMessage({
     chatId,
     parentId: body.sourceMessageId,
     role: "user",
@@ -36,11 +35,10 @@ export async function POST(
     branchCharEnd: body.charEnd,
   });
 
-  touchChat(chatId);
+  await touchChat(chatId);
 
-  // Build context: path from root to source message + branch root
-  const contextPath = getPathToRoot(branchRoot.id);
-  const settings = getSettings();
+  const contextPath = await getPathToRoot(branchRoot.id);
+  const settings = await getSettingsAsync();
 
   const llmMessages: LLMMessage[] = [
     { role: "system", content: DEFAULT_SYSTEM_PROMPT },
@@ -56,7 +54,6 @@ export async function POST(
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        // Immediately send the branch root so the client can navigate
         controller.enqueue(
           encoder.encode(
             `data: ${JSON.stringify({ type: "branch_root", message: branchRoot })}\n\n`
@@ -71,9 +68,7 @@ export async function POST(
             settings,
             onFailover: (evt: FailoverEvent) => {
               controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify(evt)}\n\n`
-                )
+                encoder.encode(`data: ${JSON.stringify(evt)}\n\n`)
               );
             },
           });
@@ -117,7 +112,7 @@ export async function POST(
           }
         }
 
-        const assistantMessage = createMessage({
+        const assistantMessage = await createMessage({
           chatId,
           parentId: branchRoot.id,
           role: "assistant",
@@ -132,12 +127,11 @@ export async function POST(
               type: "done",
               message: assistantMessage,
               actualProvider,
-              actualModel
+              actualModel,
             })}\n\n`
           )
         );
 
-        // Extract facts for memory
         try {
           await onNewExchange(chatId, branchRoot.id, branchContent, fullContent);
         } catch (err) {

@@ -7,7 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ chatId: string }> }
 ) {
   const { chatId } = await params;
-  const chat = getChat(chatId);
+  const chat = await getChat(chatId);
   if (!chat) {
     return NextResponse.json({ error: "Chat not found" }, { status: 404 });
   }
@@ -21,15 +21,15 @@ export async function PATCH(
   const { chatId } = await params;
   const body = await request.json();
   if (body.title !== undefined) {
-    renameChat(chatId, body.title);
+    await renameChat(chatId, body.title);
   }
   if (body.starred !== undefined) {
-    starChat(chatId, body.starred);
+    await starChat(chatId, body.starred);
   }
   if (body.projectId !== undefined) {
-    assignChatToProject(chatId, body.projectId);
+    await assignChatToProject(chatId, body.projectId);
   }
-  const chat = getChat(chatId);
+  const chat = await getChat(chatId);
   return NextResponse.json(chat);
 }
 
@@ -38,6 +38,6 @@ export async function DELETE(
   { params }: { params: Promise<{ chatId: string }> }
 ) {
   const { chatId } = await params;
-  deleteChat(chatId);
+  await deleteChat(chatId);
   return NextResponse.json({ success: true });
 }

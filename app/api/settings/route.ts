@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSettings, updateSettings } from "@/db/queries/settings";
-import { getAllOAuthStatus, deleteOAuthTokens } from "@/db/queries/oauth-tokens";
-import { isOAuthAvailable } from "@/lib/oauth/config";
-import type { LLMProviderName, AuthMode, Settings } from "@/types";
-
-const PROVIDERS: LLMProviderName[] = ["openai", "anthropic", "gemini", "ollama"];
+import { getSettingsAsync, updateSettings } from "@/db/queries/settings";
+import { getAuthContext } from "@/lib/auth/helpers";
+import type { Settings } from "@/types";
 
 function maskSecrets(settings: Settings) {
   return {
@@ -12,7 +9,6 @@ function maskSecrets(settings: Settings) {
     openaiApiKey: settings.openaiApiKey ? "••••••••" : null,
     anthropicApiKey: settings.anthropicApiKey ? "••••••••" : null,
     geminiApiKey: settings.geminiApiKey ? "••••••••" : null,
-    // OAuth client credentials are no longer stored — omit them
     openaiOauthClientId: null,
     openaiOauthClientSecret: null,
     anthropicOauthClientId: null,
@@ -22,26 +18,19 @@ function maskSecrets(settings: Settings) {
   };
 }
 
-function buildOAuthStatus() {
-  const connectionStatus = getAllOAuthStatus();
-  return PROVIDERS.reduce(
-    (acc, provider) => {
-      acc[provider] = {
-        ...connectionStatus[provider],
-        available: isOAuthAvailable(provider),
-      };
-      return acc;
-    },
-    {} as Record<string, { connected: boolean; tier: string | null; available: boolean }>
-  );
-}
-
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const settings = getSettings();
+    const settings = await getSettingsAsync();
+    const auth = await getAuthContext(request);
     return NextResponse.json({
       ...maskSecrets(settings),
-      oauthStatus: buildOAuthStatus(),
+      isAdmin: auth.isAdmin,
+      oauthStatus: {
+        openai: { connected: false, tier: null, available: false },
+        anthropic: { connected: false, tier: null, available: false },
+        gemini: { connected: false, tier: null, available: false },
+        ollama: { connected: false, tier: null, available: false },
+      },
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -50,44 +39,40 @@ export async function GET() {
 
 export async function PUT(request: NextRequest) {
   try {
+    const auth = await getAuthContext(request);
     const body = await request.json();
-    updateSettings(body);
-    const settings = getSettings();
+
+    // Only admin can update API keys
+    if ((body.anthropicApiKey || body.openaiApiKey || body.geminiApiKey) && !auth.isAdmin) {
+      return NextResponse.json({ error: "Only admin can update API keys" }, { status: 403 });
+    }
+
+    await updateSettings(body);
+    const settings = await getSettingsAsync();
     return NextResponse.json({
       ...maskSecrets(settings),
-      oauthStatus: buildOAuthStatus(),
+      isAdmin: auth.isAdmin,
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
-/**
- * DELETE /api/settings — Clear all saved credentials (API keys, OAuth tokens, setup tokens).
- * Resets all auth modes back to "api_key".
- */
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
   try {
-    // Clear all API keys and reset auth modes
-    updateSettings({
+    const auth = await getAuthContext(request);
+    if (!auth.isAdmin) {
+      return NextResponse.json({ error: "Only admin can clear credentials" }, { status: 403 });
+    }
+
+    await updateSettings({
       openaiApiKey: null,
       anthropicApiKey: null,
       geminiApiKey: null,
-      openaiAuthMode: "api_key" as AuthMode,
-      anthropicAuthMode: "api_key" as AuthMode,
-      geminiAuthMode: "api_key" as AuthMode,
     });
 
-    // Clear all OAuth tokens
-    for (const provider of PROVIDERS) {
-      deleteOAuthTokens(provider);
-    }
-
-    const settings = getSettings();
-    return NextResponse.json({
-      ...maskSecrets(settings),
-      oauthStatus: buildOAuthStatus(),
-    });
+    const settings = await getSettingsAsync();
+    return NextResponse.json(maskSecrets(settings));
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

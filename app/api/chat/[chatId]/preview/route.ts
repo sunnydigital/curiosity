@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMessage, getChildren, updatePreviewSummary } from "@/db/queries/messages";
-import { getSettings } from "@/db/queries/settings";
+import { getSettingsAsync } from "@/db/queries/settings";
 import { getProviderAsync } from "@/lib/llm/provider-registry";
 import { PREVIEW_PROMPT } from "@/lib/constants";
 
@@ -12,21 +12,19 @@ export async function POST(
   const body = await request.json();
   const { messageId } = body;
 
-  const message = getMessage(messageId);
+  const message = await getMessage(messageId);
   if (!message) {
     return NextResponse.json({ error: "Message not found" }, { status: 404 });
   }
 
-  // Return cached preview if available
   if (message.previewSummary) {
     return NextResponse.json({ summary: message.previewSummary });
   }
 
-  // Get first child (assistant response) to include in preview context
-  const children = getChildren(messageId);
+  const children = await getChildren(messageId);
   const firstResponse = children.find((c) => c.role === "assistant");
 
-  const settings = getSettings();
+  const settings = await getSettingsAsync();
   const provider = await getProviderAsync(settings.previewProvider, settings);
 
   try {
@@ -36,19 +34,14 @@ export async function POST(
         { role: "system", content: PREVIEW_PROMPT },
         { role: "user", content: message.content },
         ...(firstResponse
-          ? [
-              {
-                role: "assistant" as const,
-                content: firstResponse.content,
-              },
-            ]
+          ? [{ role: "assistant" as const, content: firstResponse.content }]
           : []),
       ],
       maxTokens: 150,
     });
 
     const summary = response.content.trim();
-    updatePreviewSummary(messageId, summary);
+    await updatePreviewSummary(messageId, summary);
 
     return NextResponse.json({ summary });
   } catch (error: any) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSettings } from "@/db/queries/settings";
+import { getSettingsAsync } from "@/db/queries/settings";
 import { getSelectionSummaryPrompt } from "@/lib/constants";
 import { getProvider, getProviderAsync } from "@/lib/llm/provider-registry";
 import { BaseLLMProvider } from "@/lib/llm/types";
@@ -101,7 +101,7 @@ export async function POST(
     return NextResponse.json({ error: "No text to summarize" }, { status: 400 });
   }
 
-  const settings = getSettings();
+  const settings = await getSettingsAsync();
   const sentences = settings.summarySentences ?? 2;
   const summaryPrompt = getSelectionSummaryPrompt(sentences);
 

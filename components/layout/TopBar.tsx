@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useTheme } from "@/components/ThemeProvider";
 import { ProviderSwitcher } from "@/components/chat/ProviderSwitcher";
+import { UserMenu } from "@/components/auth/UserMenu";
 import { DEFAULT_MODELS } from "@/lib/llm/model-equivalents";
 import type { LLMProviderName, Settings } from "@/types";
 
@@ -130,6 +131,8 @@ export function TopBar() {
             </TooltipTrigger>
             <TooltipContent>Settings</TooltipContent>
           </Tooltip>
+
+          <UserMenu />
         </div>
       </div>
     </TooltipProvider>

@@ -2,15 +2,7 @@ import { getDb } from "@/db";
 import { v4 as uuidv4 } from "uuid";
 import type { Project } from "@/types";
 
-interface ProjectRow {
-  id: string;
-  title: string;
-  icon: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-function rowToProject(row: ProjectRow): Project {
+function rowToProject(row: any): Project {
   return {
     id: row.id,
     title: row.title,
@@ -20,48 +12,45 @@ function rowToProject(row: ProjectRow): Project {
   };
 }
 
-export function createProject(title: string, icon?: string): Project {
+export async function createProject(title: string, icon?: string, userId?: string | null): Promise<Project> {
   const db = getDb();
   const id = uuidv4();
-  db.prepare("INSERT INTO projects (id, title, icon) VALUES (?, ?, ?)").run(
-    id,
-    title,
-    icon || null
-  );
-  return getProject(id)!;
+  const { data, error } = await db
+    .from('projects')
+    .insert({ id, title, icon: icon || null, user_id: userId || null })
+    .select()
+    .single();
+  if (error) throw error;
+  return rowToProject(data);
 }
 
-export function getProject(id: string): Project | null {
+export async function getProject(id: string): Promise<Project | null> {
   const db = getDb();
-  const row = db
-    .prepare("SELECT * FROM projects WHERE id = ?")
-    .get(id) as ProjectRow | undefined;
-  return row ? rowToProject(row) : null;
+  const { data, error } = await db.from('projects').select('*').eq('id', id).single();
+  if (error || !data) return null;
+  return rowToProject(data);
 }
 
-export function listProjects(): Project[] {
+export async function listProjects(userId?: string | null): Promise<Project[]> {
   const db = getDb();
-  const rows = db
-    .prepare("SELECT * FROM projects ORDER BY updated_at DESC")
-    .all() as ProjectRow[];
-  return rows.map(rowToProject);
+  let q = db.from('projects').select('*').order('updated_at', { ascending: false });
+  if (userId) q = q.eq('user_id', userId);
+  const { data, error } = await q;
+  if (error || !data) return [];
+  return data.map(rowToProject);
 }
 
-export function renameProject(id: string, title: string): void {
+export async function renameProject(id: string, title: string): Promise<void> {
   const db = getDb();
-  db.prepare(
-    "UPDATE projects SET title = ?, updated_at = datetime('now') WHERE id = ?"
-  ).run(title, id);
+  await db.from('projects').update({ title, updated_at: new Date().toISOString() }).eq('id', id);
 }
 
-export function deleteProject(id: string): void {
+export async function deleteProject(id: string): Promise<void> {
   const db = getDb();
-  db.prepare("DELETE FROM projects WHERE id = ?").run(id);
+  await db.from('projects').delete().eq('id', id);
 }
 
-export function assignChatToProject(chatId: string, projectId: string | null): void {
+export async function assignChatToProject(chatId: string, projectId: string | null): Promise<void> {
   const db = getDb();
-  db.prepare(
-    "UPDATE chats SET project_id = ?, updated_at = datetime('now') WHERE id = ?"
-  ).run(projectId, chatId);
+  await db.from('chats').update({ project_id: projectId, updated_at: new Date().toISOString() }).eq('id', chatId);
 }

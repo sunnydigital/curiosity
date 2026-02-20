@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listModelsFromRegistry } from "@/lib/llm/pi-models";
 import { OllamaProvider } from "@/lib/llm/ollama-provider";
-import { getSettings } from "@/db/queries/settings";
+import { getSettingsAsync } from "@/db/queries/settings";
 import type { LLMProviderName } from "@/types";
 
 const VALID_PROVIDERS = new Set(["openai", "anthropic", "gemini", "ollama"]);
@@ -19,7 +19,7 @@ export async function GET(
   try {
     if (provider === "ollama") {
       // Ollama models are local — query the running server
-      const settings = getSettings();
+      const settings = await getSettingsAsync();
       const ollama = new OllamaProvider(settings.ollamaBaseUrl);
       const ids = await ollama.listModels();
       return NextResponse.json({

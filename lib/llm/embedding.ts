@@ -1,4 +1,4 @@
-import { getSettings } from "@/db/queries/settings";
+import { getSettings, getSettingsAsync } from "@/db/queries/settings";
 import { getProviderAsync } from "./provider-registry";
 import { generateLocalEmbedding } from "./local-embedding-provider";
 import type { LLMProviderName } from "@/types";
@@ -26,7 +26,16 @@ export interface EmbeddingResult {
  * Used by the UI to determine which memories are compatible.
  */
 export function getCurrentEmbeddingModel(): string {
-  const settings = getSettings();
+  // This needs settings synchronously - use a cached fallback
+  try {
+    const settings = getSettings();
+    return _getCurrentEmbeddingModel(settings);
+  } catch {
+    return 'text-embedding-3-small';
+  }
+}
+
+function _getCurrentEmbeddingModel(settings: ReturnType<typeof getSettings>): string {
 
   if (settings.embeddingMode === "local") {
     return settings.localEmbeddingModel;
@@ -48,7 +57,7 @@ export function getCurrentEmbeddingModel(): string {
 }
 
 export async function generateEmbedding(text: string): Promise<EmbeddingResult> {
-  const settings = getSettings();
+  const settings = await getSettingsAsync();
 
   // Check if using local embeddings
   if (settings.embeddingMode === "local") {

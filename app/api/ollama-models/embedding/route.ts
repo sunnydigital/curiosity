@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSettings } from "@/db/queries/settings";
+import { getSettingsAsync } from "@/db/queries/settings";
 
 /**
  * GET /api/ollama-models/embedding
@@ -9,7 +9,7 @@ import { getSettings } from "@/db/queries/settings";
  */
 export async function GET() {
   try {
-    const settings = getSettings();
+    const settings = await getSettingsAsync();
     const baseUrl = settings.ollamaBaseUrl.replace(/\/$/, "");
     const res = await fetch(`${baseUrl}/api/tags`, {
       signal: AbortSignal.timeout(5000),

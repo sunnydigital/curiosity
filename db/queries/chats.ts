@@ -2,94 +2,117 @@ import { getDb } from "@/db";
 import { v4 as uuidv4 } from "uuid";
 import type { Chat } from "@/types";
 
-interface ChatRow {
-  id: string;
-  title: string;
-  starred: number;
-  project_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-function rowToChat(row: ChatRow): Chat {
+function rowToChat(row: any): Chat {
   return {
     id: row.id,
     title: row.title,
-    starred: row.starred === 1,
+    starred: row.starred === true,
     projectId: row.project_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-export function createChat(title?: string): Chat {
+export async function createChat(title?: string, userId?: string | null, anonIp?: string | null): Promise<Chat> {
   const db = getDb();
   const id = uuidv4();
-  db.prepare("INSERT INTO chats (id, title) VALUES (?, ?)").run(
-    id,
-    title || "New Chat"
-  );
-  return getChat(id)!;
+  const { data, error } = await db
+    .from('chats')
+    .insert({
+      id,
+      title: title || 'New Chat',
+      user_id: userId || null,
+      anon_ip: anonIp || null,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return rowToChat(data);
 }
 
-export function getChat(id: string): Chat | null {
+export async function getChat(id: string): Promise<Chat | null> {
   const db = getDb();
-  const row = db
-    .prepare("SELECT * FROM chats WHERE id = ?")
-    .get(id) as ChatRow | undefined;
-  return row ? rowToChat(row) : null;
+  const { data, error } = await db
+    .from('chats')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error || !data) return null;
+  return rowToChat(data);
 }
 
-export function listChats(query?: string): Chat[] {
+export async function listChats(userId?: string | null, anonIp?: string | null, query?: string): Promise<Chat[]> {
   const db = getDb();
-  if (query) {
-    const rows = db
-      .prepare(
-        `SELECT c.* FROM chats c
-         WHERE c.title LIKE ?
-         AND EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = c.id)
-         ORDER BY c.starred DESC, c.updated_at DESC`
-      )
-      .all(`%${query}%`) as ChatRow[];
-    return rows.map(rowToChat);
+  let q = db.from('chats').select('*');
+
+  if (userId) {
+    q = q.eq('user_id', userId);
+  } else if (anonIp) {
+    q = q.eq('anon_ip', anonIp).is('user_id', null);
+  } else {
+    return [];
   }
-  const rows = db
-    .prepare(
-      `SELECT c.* FROM chats c
-       WHERE EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = c.id)
-       ORDER BY c.starred DESC, c.updated_at DESC`
-    )
-    .all() as ChatRow[];
-  return rows.map(rowToChat);
+
+  if (query) {
+    q = q.ilike('title', `%${query}%`);
+  }
+
+  // Only return chats that have messages
+  const { data: chats, error } = await q.order('starred', { ascending: false }).order('updated_at', { ascending: false });
+
+  if (error || !chats) return [];
+
+  // Filter to chats with messages
+  const chatIds = chats.map((c: any) => c.id);
+  if (chatIds.length === 0) return [];
+
+  const { data: msgData } = await db
+    .from('messages')
+    .select('chat_id')
+    .in('chat_id', chatIds);
+
+  const chatsWithMessages = new Set((msgData || []).map((m: any) => m.chat_id));
+  return chats.filter((c: any) => chatsWithMessages.has(c.id)).map(rowToChat);
 }
 
-export function renameChat(id: string, title: string): void {
+export async function renameChat(id: string, title: string): Promise<void> {
   const db = getDb();
-  db.prepare(
-    "UPDATE chats SET title = ?, updated_at = datetime('now') WHERE id = ?"
-  ).run(title, id);
+  await db.from('chats').update({ title, updated_at: new Date().toISOString() }).eq('id', id);
 }
 
-export function deleteChat(id: string): void {
+export async function deleteChat(id: string): Promise<void> {
   const db = getDb();
-  db.prepare("DELETE FROM chats WHERE id = ?").run(id);
+  await db.from('chats').delete().eq('id', id);
 }
 
-export function touchChat(id: string): void {
+export async function touchChat(id: string): Promise<void> {
   const db = getDb();
-  db.prepare("UPDATE chats SET updated_at = datetime('now') WHERE id = ?").run(
-    id
-  );
+  await db.from('chats').update({ updated_at: new Date().toISOString() }).eq('id', id);
 }
 
-export function deleteAllChats(): void {
+export async function deleteAllChats(userId?: string): Promise<void> {
   const db = getDb();
-  db.prepare("DELETE FROM chats").run();
+  let q = db.from('chats').delete();
+  if (userId) q = q.eq('user_id', userId);
+  await q;
 }
 
-export function starChat(id: string, starred: boolean): void {
+export async function starChat(id: string, starred: boolean): Promise<void> {
   const db = getDb();
-  db.prepare(
-    "UPDATE chats SET starred = ?, updated_at = datetime('now') WHERE id = ?"
-  ).run(starred ? 1 : 0, id);
+  await db.from('chats').update({ starred, updated_at: new Date().toISOString() }).eq('id', id);
+}
+
+export async function migrateAnonChatsToUser(anonIp: string, userId: string): Promise<number> {
+  const db = getDb();
+  const { data, error } = await db
+    .from('chats')
+    .update({ user_id: userId, anon_ip: null })
+    .eq('anon_ip', anonIp)
+    .is('user_id', null)
+    .select('id');
+
+  if (error) return 0;
+  return data?.length || 0;
 }

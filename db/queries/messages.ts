@@ -2,33 +2,14 @@ import { getDb } from "@/db";
 import { v4 as uuidv4 } from "uuid";
 import type { Message } from "@/types";
 
-interface MessageRow {
-  id: string;
-  chat_id: string;
-  parent_id: string | null;
-  role: string;
-  content: string;
-  is_branch_root: number;
-  branch_prompt: string | null;
-  branch_context: string | null;
-  branch_source_message_id: string | null;
-  branch_char_start: number | null;
-  branch_char_end: number | null;
-  preview_summary: string | null;
-  sibling_index: number;
-  provider: string | null;
-  model: string | null;
-  created_at: string;
-}
-
-function rowToMessage(row: MessageRow): Message {
+function rowToMessage(row: any): Message {
   return {
     id: row.id,
     chatId: row.chat_id,
     parentId: row.parent_id,
     role: row.role as Message["role"],
     content: row.content,
-    isBranchRoot: row.is_branch_root === 1,
+    isBranchRoot: row.is_branch_root === true,
     branchPrompt: row.branch_prompt,
     branchContext: row.branch_context,
     branchSourceMessageId: row.branch_source_message_id,
@@ -42,7 +23,7 @@ function rowToMessage(row: MessageRow): Message {
   };
 }
 
-export function createMessage(params: {
+export async function createMessage(params: {
   chatId: string;
   parentId?: string | null;
   role: Message["role"];
@@ -55,135 +36,167 @@ export function createMessage(params: {
   branchCharEnd?: number | null;
   provider?: string | null;
   model?: string | null;
-}): Message {
+}): Promise<Message> {
   const db = getDb();
   const id = uuidv4();
 
   let siblingIndex = 0;
   if (params.parentId) {
-    const countRow = db
-      .prepare("SELECT COUNT(*) as cnt FROM messages WHERE parent_id = ?")
-      .get(params.parentId) as { cnt: number };
-    siblingIndex = countRow.cnt;
+    const { count } = await db
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('parent_id', params.parentId);
+    siblingIndex = count || 0;
   }
 
-  db.prepare(
-    `INSERT INTO messages (id, chat_id, parent_id, role, content, is_branch_root,
-     branch_prompt, branch_context, branch_source_message_id, branch_char_start,
-     branch_char_end, sibling_index, provider, model)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    params.chatId,
-    params.parentId || null,
-    params.role,
-    params.content,
-    params.isBranchRoot ? 1 : 0,
-    params.branchPrompt || null,
-    params.branchContext || null,
-    params.branchSourceMessageId || null,
-    params.branchCharStart ?? null,
-    params.branchCharEnd ?? null,
-    siblingIndex,
-    params.provider || null,
-    params.model || null
-  );
+  const { data, error } = await db
+    .from('messages')
+    .insert({
+      id,
+      chat_id: params.chatId,
+      parent_id: params.parentId || null,
+      role: params.role,
+      content: params.content,
+      is_branch_root: params.isBranchRoot || false,
+      branch_prompt: params.branchPrompt || null,
+      branch_context: params.branchContext || null,
+      branch_source_message_id: params.branchSourceMessageId || null,
+      branch_char_start: params.branchCharStart ?? null,
+      branch_char_end: params.branchCharEnd ?? null,
+      sibling_index: siblingIndex,
+      provider: params.provider || null,
+      model: params.model || null,
+    })
+    .select()
+    .single();
 
-  return getMessage(id)!;
+  if (error) throw error;
+  return rowToMessage(data);
 }
 
-export function getMessage(id: string): Message | null {
+export async function getMessage(id: string): Promise<Message | null> {
   const db = getDb();
-  const row = db
-    .prepare("SELECT * FROM messages WHERE id = ?")
-    .get(id) as MessageRow | undefined;
-  return row ? rowToMessage(row) : null;
+  const { data, error } = await db
+    .from('messages')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error || !data) return null;
+  return rowToMessage(data);
 }
 
-export function getMessagesByChat(chatId: string): Message[] {
+export async function getMessagesByChat(chatId: string): Promise<Message[]> {
   const db = getDb();
-  const rows = db
-    .prepare("SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at ASC")
-    .all(chatId) as MessageRow[];
-  return rows.map(rowToMessage);
+  const { data, error } = await db
+    .from('messages')
+    .select('*')
+    .eq('chat_id', chatId)
+    .order('created_at', { ascending: true });
+
+  if (error || !data) return [];
+  return data.map(rowToMessage);
 }
 
-export function getPathToRoot(messageId: string): Message[] {
+export async function getPathToRoot(messageId: string): Promise<Message[]> {
+  // Supabase doesn't support recursive CTEs directly, so we walk up manually
   const db = getDb();
-  const rows = db
-    .prepare(
-      `WITH RECURSIVE ancestors AS (
-        SELECT * FROM messages WHERE id = ?
-        UNION ALL
-        SELECT m.* FROM messages m JOIN ancestors a ON m.id = a.parent_id
-      )
-      SELECT * FROM ancestors ORDER BY created_at ASC`
-    )
-    .all(messageId) as MessageRow[];
-  return rows.map(rowToMessage);
+  const messages: Message[] = [];
+  let currentId: string | null = messageId;
+
+  while (currentId) {
+    const result: { data: any; error: any } = await db
+      .from('messages')
+      .select('*')
+      .eq('id', currentId)
+      .single();
+
+    if (result.error || !result.data) break;
+    messages.unshift(rowToMessage(result.data));
+    currentId = result.data.parent_id;
+  }
+
+  return messages;
 }
 
-export function getSubtree(messageId: string): Message[] {
+export async function getSubtree(messageId: string): Promise<Message[]> {
+  // Walk down from message collecting all descendants
   const db = getDb();
-  const rows = db
-    .prepare(
-      `WITH RECURSIVE descendants AS (
-        SELECT * FROM messages WHERE id = ?
-        UNION ALL
-        SELECT m.* FROM messages m JOIN descendants d ON m.parent_id = d.id
-      )
-      SELECT * FROM descendants ORDER BY created_at ASC`
-    )
-    .all(messageId) as MessageRow[];
-  return rows.map(rowToMessage);
+  const result: Message[] = [];
+  const queue = [messageId];
+
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    const msgResult: { data: any } = await db.from('messages').select('*').eq('id', id).single();
+    if (msgResult.data) {
+      result.push(rowToMessage(msgResult.data));
+      const childResult: { data: any } = await db.from('messages').select('id').eq('parent_id', id);
+      if (childResult.data) queue.push(...childResult.data.map((c: any) => c.id));
+    }
+  }
+
+  return result.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 }
 
-export function getChildren(messageId: string): Message[] {
+export async function getChildren(messageId: string): Promise<Message[]> {
   const db = getDb();
-  const rows = db
-    .prepare(
-      "SELECT * FROM messages WHERE parent_id = ? ORDER BY sibling_index ASC"
-    )
-    .all(messageId) as MessageRow[];
-  return rows.map(rowToMessage);
+  const { data, error } = await db
+    .from('messages')
+    .select('*')
+    .eq('parent_id', messageId)
+    .order('sibling_index', { ascending: true });
+
+  if (error || !data) return [];
+  return data.map(rowToMessage);
 }
 
-export function getBranches(messageId: string): Message[] {
+export async function getBranches(messageId: string): Promise<Message[]> {
   const db = getDb();
-  const rows = db
-    .prepare(
-      "SELECT * FROM messages WHERE branch_source_message_id = ? AND is_branch_root = 1 ORDER BY created_at ASC"
-    )
-    .all(messageId) as MessageRow[];
-  return rows.map(rowToMessage);
+  const { data, error } = await db
+    .from('messages')
+    .select('*')
+    .eq('branch_source_message_id', messageId)
+    .eq('is_branch_root', true)
+    .order('created_at', { ascending: true });
+
+  if (error || !data) return [];
+  return data.map(rowToMessage);
 }
 
-export function getRootMessage(chatId: string): Message | null {
+export async function getRootMessage(chatId: string): Promise<Message | null> {
   const db = getDb();
-  const row = db
-    .prepare(
-      "SELECT * FROM messages WHERE chat_id = ? AND parent_id IS NULL ORDER BY created_at ASC LIMIT 1"
-    )
-    .get(chatId) as MessageRow | undefined;
-  return row ? rowToMessage(row) : null;
+  const { data, error } = await db
+    .from('messages')
+    .select('*')
+    .eq('chat_id', chatId)
+    .is('parent_id', null)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .single();
+
+  if (error || !data) return null;
+  return rowToMessage(data);
 }
 
-export function getMainPath(chatId: string): Message[] {
-  const db = getDb();
-  const root = getRootMessage(chatId);
+export async function getMainPath(chatId: string): Promise<Message[]> {
+  const root = await getRootMessage(chatId);
   if (!root) return [];
 
   const messages: Message[] = [root];
   let current = root;
 
   while (true) {
-    const children = db
-      .prepare(
-        "SELECT * FROM messages WHERE parent_id = ? ORDER BY sibling_index ASC LIMIT 1"
-      )
-      .get(current.id) as MessageRow | undefined;
-    if (!children) break;
-    const msg = rowToMessage(children);
+    const db = getDb();
+    const { data, error } = await db
+      .from('messages')
+      .select('*')
+      .eq('parent_id', current.id)
+      .order('sibling_index', { ascending: true })
+      .limit(1)
+      .single();
+
+    if (error || !data) break;
+    const msg = rowToMessage(data);
     messages.push(msg);
     current = msg;
   }
@@ -191,37 +204,32 @@ export function getMainPath(chatId: string): Message[] {
   return messages;
 }
 
-export function updatePreviewSummary(
-  messageId: string,
-  summary: string
-): void {
+export async function updatePreviewSummary(messageId: string, summary: string): Promise<void> {
   const db = getDb();
-  db.prepare("UPDATE messages SET preview_summary = ? WHERE id = ?").run(
-    summary,
-    messageId
-  );
+  await db.from('messages').update({ preview_summary: summary }).eq('id', messageId);
 }
 
-export function deleteMessage(messageId: string): boolean {
+export async function deleteMessage(messageId: string): Promise<boolean> {
   const db = getDb();
-  // Only delete if the message has no children
-  const childCount = db
-    .prepare("SELECT COUNT(*) as cnt FROM messages WHERE parent_id = ?")
-    .get(messageId) as { cnt: number };
-  if (childCount.cnt > 0) return false;
-  db.prepare("DELETE FROM messages WHERE id = ?").run(messageId);
+  const { count } = await db
+    .from('messages')
+    .select('*', { count: 'exact', head: true })
+    .eq('parent_id', messageId);
+
+  if ((count || 0) > 0) return false;
+  await db.from('messages').delete().eq('id', messageId);
   return true;
 }
 
-export function deleteBranch(messageId: string): void {
+export async function deleteBranch(messageId: string): Promise<void> {
+  // Collect all descendant IDs then delete
+  const subtree = await getSubtree(messageId);
+  const ids = subtree.map(m => m.id);
+  if (ids.length === 0) return;
+
   const db = getDb();
-  // Delete the message and all its descendants using recursive CTE
-  db.prepare(
-    `WITH RECURSIVE descendants AS (
-      SELECT id FROM messages WHERE id = ?
-      UNION ALL
-      SELECT m.id FROM messages m JOIN descendants d ON m.parent_id = d.id
-    )
-    DELETE FROM messages WHERE id IN (SELECT id FROM descendants)`
-  ).run(messageId);
+  // Delete in reverse order (leaves first) to respect FK constraints
+  for (let i = ids.length - 1; i >= 0; i--) {
+    await db.from('messages').delete().eq('id', ids[i]);
+  }
 }

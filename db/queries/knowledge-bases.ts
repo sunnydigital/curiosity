@@ -1,27 +1,19 @@
 import { getDb } from "@/db";
 import { v4 as uuidv4 } from "uuid";
-import { embeddingToBuffer, bufferToEmbedding, cosineSimilarity } from "@/lib/utils";
+import { cosineSimilarity } from "@/lib/utils";
 import type { KnowledgeBase, KnowledgeBaseEntry } from "@/types";
 
-interface KBRow {
-  id: string;
-  name: string;
-  description: string;
-  created_at: string;
-  updated_at: string;
+function embeddingToBase64(embedding: number[]): string {
+  const buf = Buffer.from(new Float32Array(embedding).buffer);
+  return buf.toString('base64');
 }
 
-interface KBEntryRow {
-  id: string;
-  knowledge_base_id: string;
-  memory_id: string | null;
-  content: string;
-  embedding: Buffer;
-  embedding_model: string | null;
-  created_at: string;
+function base64ToEmbedding(b64: string): Float32Array {
+  const buf = Buffer.from(b64, 'base64');
+  return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
 }
 
-function rowToKB(row: KBRow): KnowledgeBase {
+function rowToKB(row: any): KnowledgeBase {
   return {
     id: row.id,
     name: row.name,
@@ -31,158 +23,143 @@ function rowToKB(row: KBRow): KnowledgeBase {
   };
 }
 
-function rowToEntry(row: KBEntryRow): KnowledgeBaseEntry {
+function rowToEntry(row: any): KnowledgeBaseEntry {
   return {
     id: row.id,
     knowledgeBaseId: row.knowledge_base_id,
     memoryId: row.memory_id,
     content: row.content,
-    embedding: new Float32Array(
-      row.embedding.buffer,
-      row.embedding.byteOffset,
-      row.embedding.byteLength / 4
-    ),
+    embedding: typeof row.embedding === 'string'
+      ? base64ToEmbedding(row.embedding)
+      : new Float32Array(0),
     embeddingModel: row.embedding_model,
     createdAt: row.created_at,
   };
 }
 
-export function createKnowledgeBase(name: string, description?: string): KnowledgeBase {
+export async function createKnowledgeBase(name: string, description?: string, userId?: string | null): Promise<KnowledgeBase> {
   const db = getDb();
   const id = uuidv4();
-  db.prepare("INSERT INTO knowledge_bases (id, name, description) VALUES (?, ?, ?)").run(
-    id,
-    name,
-    description || ""
-  );
-  return getKnowledgeBase(id)!;
+  const { data, error } = await db
+    .from('knowledge_bases')
+    .insert({ id, name, description: description || '', user_id: userId || null })
+    .select()
+    .single();
+  if (error) throw error;
+  return rowToKB(data);
 }
 
-export function getKnowledgeBase(id: string): KnowledgeBase | null {
+export async function getKnowledgeBase(id: string): Promise<KnowledgeBase | null> {
   const db = getDb();
-  const row = db
-    .prepare("SELECT * FROM knowledge_bases WHERE id = ?")
-    .get(id) as KBRow | undefined;
-  if (!row) return null;
-  const kb = rowToKB(row);
-  const count = db
-    .prepare("SELECT COUNT(*) as cnt FROM knowledge_base_entries WHERE knowledge_base_id = ?")
-    .get(id) as { cnt: number };
-  kb.entryCount = count.cnt;
+  const { data, error } = await db.from('knowledge_bases').select('*').eq('id', id).single();
+  if (error || !data) return null;
+  const kb = rowToKB(data);
+  const { count } = await db.from('knowledge_base_entries').select('*', { count: 'exact', head: true }).eq('knowledge_base_id', id);
+  kb.entryCount = count || 0;
   return kb;
 }
 
-export function listKnowledgeBases(): KnowledgeBase[] {
+export async function listKnowledgeBases(userId?: string | null): Promise<KnowledgeBase[]> {
   const db = getDb();
-  const rows = db
-    .prepare("SELECT * FROM knowledge_bases ORDER BY updated_at DESC")
-    .all() as KBRow[];
-  return rows.map((row) => {
+  let q = db.from('knowledge_bases').select('*').order('updated_at', { ascending: false });
+  if (userId) q = q.eq('user_id', userId);
+  const { data, error } = await q;
+  if (error || !data) return [];
+
+  const result: KnowledgeBase[] = [];
+  for (const row of data) {
     const kb = rowToKB(row);
-    const count = db
-      .prepare("SELECT COUNT(*) as cnt FROM knowledge_base_entries WHERE knowledge_base_id = ?")
-      .get(row.id) as { cnt: number };
-    kb.entryCount = count.cnt;
-    return kb;
-  });
-}
-
-export function updateKnowledgeBase(
-  id: string,
-  params: { name?: string; description?: string }
-): void {
-  const db = getDb();
-  const updates: string[] = [];
-  const values: any[] = [];
-  if (params.name !== undefined) {
-    updates.push("name = ?");
-    values.push(params.name);
+    const { count } = await db.from('knowledge_base_entries').select('*', { count: 'exact', head: true }).eq('knowledge_base_id', row.id);
+    kb.entryCount = count || 0;
+    result.push(kb);
   }
-  if (params.description !== undefined) {
-    updates.push("description = ?");
-    values.push(params.description);
-  }
-  if (updates.length === 0) return;
-  updates.push("updated_at = datetime('now')");
-  values.push(id);
-  db.prepare(`UPDATE knowledge_bases SET ${updates.join(", ")} WHERE id = ?`).run(...values);
+  return result;
 }
 
-export function deleteKnowledgeBase(id: string): void {
+export async function updateKnowledgeBase(id: string, params: { name?: string; description?: string }): Promise<void> {
   const db = getDb();
-  db.prepare("DELETE FROM knowledge_bases WHERE id = ?").run(id);
+  const updates: Record<string, any> = { updated_at: new Date().toISOString() };
+  if (params.name !== undefined) updates.name = params.name;
+  if (params.description !== undefined) updates.description = params.description;
+  await db.from('knowledge_bases').update(updates).eq('id', id);
 }
 
-export function addKBEntry(params: {
+export async function deleteKnowledgeBase(id: string): Promise<void> {
+  const db = getDb();
+  await db.from('knowledge_bases').delete().eq('id', id);
+}
+
+export async function addKBEntry(params: {
   knowledgeBaseId: string;
   content: string;
   embedding: number[];
   embeddingModel?: string | null;
   memoryId?: string | null;
-}): KnowledgeBaseEntry {
+}): Promise<KnowledgeBaseEntry> {
   const db = getDb();
   const id = uuidv4();
-  const embeddingBuf = embeddingToBuffer(params.embedding);
-  db.prepare(
-    `INSERT INTO knowledge_base_entries (id, knowledge_base_id, memory_id, content, embedding, embedding_model)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(id, params.knowledgeBaseId, params.memoryId || null, params.content, embeddingBuf, params.embeddingModel || null);
-  return getKBEntry(id)!;
+  const { data, error } = await db
+    .from('knowledge_base_entries')
+    .insert({
+      id,
+      knowledge_base_id: params.knowledgeBaseId,
+      memory_id: params.memoryId || null,
+      content: params.content,
+      embedding: embeddingToBase64(params.embedding),
+      embedding_model: params.embeddingModel || null,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return rowToEntry(data);
 }
 
-export function getKBEntry(id: string): KnowledgeBaseEntry | null {
+export async function getKBEntry(id: string): Promise<KnowledgeBaseEntry | null> {
   const db = getDb();
-  const row = db
-    .prepare("SELECT * FROM knowledge_base_entries WHERE id = ?")
-    .get(id) as KBEntryRow | undefined;
-  return row ? rowToEntry(row) : null;
+  const { data, error } = await db.from('knowledge_base_entries').select('*').eq('id', id).single();
+  if (error || !data) return null;
+  return rowToEntry(data);
 }
 
-export function listKBEntries(knowledgeBaseId: string): KnowledgeBaseEntry[] {
+export async function listKBEntries(knowledgeBaseId: string): Promise<KnowledgeBaseEntry[]> {
   const db = getDb();
-  const rows = db
-    .prepare(
-      "SELECT * FROM knowledge_base_entries WHERE knowledge_base_id = ? ORDER BY created_at DESC"
-    )
-    .all(knowledgeBaseId) as KBEntryRow[];
-  return rows.map(rowToEntry);
+  const { data, error } = await db
+    .from('knowledge_base_entries')
+    .select('*')
+    .eq('knowledge_base_id', knowledgeBaseId)
+    .order('created_at', { ascending: false });
+  if (error || !data) return [];
+  return data.map(rowToEntry);
 }
 
-export function deleteKBEntry(id: string): void {
+export async function deleteKBEntry(id: string): Promise<void> {
   const db = getDb();
-  db.prepare("DELETE FROM knowledge_base_entries WHERE id = ?").run(id);
+  await db.from('knowledge_base_entries').delete().eq('id', id);
 }
 
-export function searchKBEntries(
+export async function searchKBEntries(
   queryEmbedding: number[],
   topK: number = 5,
   knowledgeBaseId?: string,
   embeddingModel?: string | null
-): (KnowledgeBaseEntry & { similarityScore: number })[] {
+): Promise<(KnowledgeBaseEntry & { similarityScore: number })[]> {
   const db = getDb();
-  let rows: KBEntryRow[];
-  if (knowledgeBaseId) {
-    rows = db
-      .prepare("SELECT * FROM knowledge_base_entries WHERE knowledge_base_id = ?")
-      .all(knowledgeBaseId) as KBEntryRow[];
-  } else {
-    rows = db.prepare("SELECT * FROM knowledge_base_entries").all() as KBEntryRow[];
-  }
+  let q = db.from('knowledge_base_entries').select('*');
+  if (knowledgeBaseId) q = q.eq('knowledge_base_id', knowledgeBaseId);
+  const { data: rows, error } = await q;
+  if (error || !rows) return [];
 
-  // Only compare entries with compatible embedding models
   const compatible = embeddingModel
-    ? rows.filter(
-        (r) => r.embedding_model === embeddingModel || r.embedding_model === null
-      )
+    ? rows.filter((r: any) => r.embedding_model === embeddingModel || r.embedding_model === null)
     : rows;
 
-  const entries = compatible.map((row) => {
+  const entries = compatible.map((row: any) => {
     const entry = rowToEntry(row);
     const entryEmbedding = Array.from(entry.embedding);
     const similarityScore = cosineSimilarity(queryEmbedding, entryEmbedding);
     return { ...entry, similarityScore };
   });
 
-  entries.sort((a, b) => b.similarityScore - a.similarityScore);
+  entries.sort((a: any, b: any) => b.similarityScore - a.similarityScore);
   return entries.slice(0, topK);
 }

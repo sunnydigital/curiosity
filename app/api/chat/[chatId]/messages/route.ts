@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMessagesByChat, createMessage, getPathToRoot } from "@/db/queries/messages";
 import { touchChat, renameChat, getChat } from "@/db/queries/chats";
-import { getSettings } from "@/db/queries/settings";
+import { getSettingsAsync } from "@/db/queries/settings";
 import { getProviderAsync } from "@/lib/llm/provider-registry";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/constants";
 import type { LLMMessage } from "@/types";
@@ -11,7 +11,7 @@ export async function GET(
   { params }: { params: Promise<{ chatId: string }> }
 ) {
   const { chatId } = await params;
-  const messages = getMessagesByChat(chatId);
+  const messages = await getMessagesByChat(chatId);
   return NextResponse.json(messages);
 }
 
@@ -23,20 +23,20 @@ export async function POST(
   const body = await request.json();
   const { content, parentId } = body;
 
-  const userMessage = createMessage({
+  const userMessage = await createMessage({
     chatId,
     parentId: parentId || null,
     role: "user",
     content,
   });
 
-  touchChat(chatId);
+  await touchChat(chatId);
 
-  const settings = getSettings();
+  const settings = await getSettingsAsync();
   const provider = await getProviderAsync(settings.activeProvider, settings);
 
   const contextMessages = parentId
-    ? getPathToRoot(userMessage.id)
+    ? await getPathToRoot(userMessage.id)
     : [userMessage];
 
   const llmMessages: LLMMessage[] = [
@@ -52,7 +52,7 @@ export async function POST(
     messages: llmMessages,
   });
 
-  const assistantMessage = createMessage({
+  const assistantMessage = await createMessage({
     chatId,
     parentId: userMessage.id,
     role: "assistant",
@@ -61,8 +61,7 @@ export async function POST(
     model: settings.activeModel,
   });
 
-  // Auto-title: if this is the first exchange, generate a title
-  const chat = getChat(chatId);
+  const chat = await getChat(chatId);
   if (chat && chat.title === "New Chat") {
     try {
       const titleResponse = await provider.complete({
@@ -78,7 +77,7 @@ export async function POST(
         ],
       });
       const title = titleResponse.content.trim().slice(0, 50);
-      if (title) renameChat(chatId, title);
+      if (title) await renameChat(chatId, title);
     } catch {
       // ignore title generation errors
     }

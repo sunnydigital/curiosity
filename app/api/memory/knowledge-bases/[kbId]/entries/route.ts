@@ -11,7 +11,7 @@ export async function GET(
   { params }: { params: Promise<{ kbId: string }> }
 ) {
   const { kbId } = await params;
-  const entries = listKBEntries(kbId);
+  const entries = await listKBEntries(kbId);
   return NextResponse.json(
     entries.map((e) => ({
       id: e.id,
@@ -31,7 +31,7 @@ export async function POST(
 
   try {
     const { embedding, model } = await generateEmbedding(body.content);
-    const entry = addKBEntry({
+    const entry = await addKBEntry({
       knowledgeBaseId: kbId,
       content: body.content,
       embedding,
@@ -52,7 +52,7 @@ export async function POST(
 export async function DELETE(request: NextRequest) {
   const body = await request.json();
   if (body.entryId) {
-    deleteKBEntry(body.entryId);
+    await deleteKBEntry(body.entryId);
   }
   return NextResponse.json({ success: true });
 }

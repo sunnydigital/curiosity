@@ -1,176 +1,54 @@
 import { getDb } from "@/db";
-import { encrypt, decrypt } from "@/lib/crypto";
 import type { LLMProviderName, OAuthTokens, PiOAuthCredentials, SubscriptionTier } from "@/types";
 
-interface OAuthTokenRow {
-  provider: string;
-  access_token: string;
-  refresh_token: string | null;
-  token_type: string;
-  expires_at: string | null;
-  scope: string | null;
-  subscription_tier: string;
-  subscription_metadata: string;
-  created_at: string;
-  updated_at: string;
+// OAuth tokens are no longer stored locally — OAuth is handled by Supabase Auth.
+// These functions are kept as stubs for compatibility.
+
+export function getOAuthTokens(_provider: LLMProviderName): OAuthTokens | null {
+  return null;
 }
 
-export function getOAuthTokens(
-  provider: LLMProviderName
-): OAuthTokens | null {
-  const db = getDb();
-  const row = db
-    .prepare("SELECT * FROM oauth_tokens WHERE provider = ?")
-    .get(provider) as OAuthTokenRow | undefined;
-
-  if (!row) return null;
-
-  let metadata: Record<string, any> | null = null;
-  try {
-    metadata = JSON.parse(row.subscription_metadata || "{}");
-  } catch {
-    metadata = null;
-  }
-
-  try {
-    return {
-      provider: row.provider as LLMProviderName,
-      accessToken: decrypt(row.access_token),
-      refreshToken: row.refresh_token ? decrypt(row.refresh_token) : null,
-      tokenType: row.token_type,
-      expiresAt: row.expires_at,
-      scope: row.scope,
-      subscriptionTier: (row.subscription_tier || "unknown") as SubscriptionTier,
-      subscriptionMetadata: metadata,
-    };
-  } catch (err) {
-    // Encrypted tokens are unreadable (key changed or corrupted) — purge them
-    console.warn(`[OAuth] Failed to decrypt tokens for ${provider}, clearing stale data:`, (err as Error).message);
-    deleteOAuthTokens(provider);
-    return null;
-  }
+export function getPiCredentials(_provider: LLMProviderName): PiOAuthCredentials | null {
+  return null;
 }
 
-/**
- * Get stored credentials in pi-ai's OAuthCredentials format.
- * Returns null if no tokens exist for the provider.
- */
-export function getPiCredentials(
-  provider: LLMProviderName
-): PiOAuthCredentials | null {
-  const tokens = getOAuthTokens(provider);
-  if (!tokens) return null;
-
-  // Parse extra metadata fields that pi-ai providers may have stored
-  const extra = tokens.subscriptionMetadata?.piExtra || {};
-
-  return {
-    access: tokens.accessToken,
-    refresh: tokens.refreshToken || "",
-    expires: tokens.expiresAt ? new Date(tokens.expiresAt).getTime() : 0,
-    ...extra,
-  };
-}
-
-/**
- * Store pi-ai OAuthCredentials in our encrypted DB.
- */
 export function upsertPiCredentials(
-  provider: LLMProviderName,
-  credentials: PiOAuthCredentials,
-  tier: SubscriptionTier = "unknown",
-  metadata: Record<string, any> = {},
+  _provider: LLMProviderName,
+  _credentials: PiOAuthCredentials,
+  _tier?: SubscriptionTier,
+  _metadata?: Record<string, any>,
 ): void {
-  // Extract known fields, store the rest as piExtra
-  const { access, refresh, expires, ...extra } = credentials;
-  const mergedMetadata = { ...metadata, piExtra: extra };
-
-  upsertOAuthTokens({
-    provider,
-    accessToken: access,
-    refreshToken: refresh || null,
-    tokenType: "bearer",
-    expiresAt: expires ? new Date(expires).toISOString() : null,
-    scope: null,
-    subscriptionTier: tier,
-    subscriptionMetadata: mergedMetadata,
-  });
+  // no-op
 }
 
-export function upsertOAuthTokens(tokens: OAuthTokens): void {
-  const db = getDb();
-  db.prepare(
-    `INSERT INTO oauth_tokens (provider, access_token, refresh_token, token_type, expires_at, scope, subscription_tier, subscription_metadata, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(provider) DO UPDATE SET
-       access_token = excluded.access_token,
-       refresh_token = excluded.refresh_token,
-       token_type = excluded.token_type,
-       expires_at = excluded.expires_at,
-       scope = excluded.scope,
-       subscription_tier = excluded.subscription_tier,
-       subscription_metadata = excluded.subscription_metadata,
-       updated_at = datetime('now')`
-  ).run(
-    tokens.provider,
-    encrypt(tokens.accessToken),
-    tokens.refreshToken ? encrypt(tokens.refreshToken) : null,
-    tokens.tokenType,
-    tokens.expiresAt,
-    tokens.scope,
-    tokens.subscriptionTier || "unknown",
-    JSON.stringify(tokens.subscriptionMetadata || {})
-  );
+export function upsertOAuthTokens(_tokens: OAuthTokens): void {
+  // no-op
 }
 
-export function deleteOAuthTokens(provider: LLMProviderName): void {
-  const db = getDb();
-  db.prepare("DELETE FROM oauth_tokens WHERE provider = ?").run(provider);
+export function deleteOAuthTokens(_provider: LLMProviderName): void {
+  // no-op
 }
 
-export function isTokenExpired(tokens: OAuthTokens): boolean {
-  if (!tokens.expiresAt) return false;
-  const expiresAt = new Date(tokens.expiresAt).getTime();
-  const bufferMs = 5 * 60 * 1000; // 5 minute buffer
-  return Date.now() >= expiresAt - bufferMs;
+export function isTokenExpired(_tokens: OAuthTokens): boolean {
+  return true;
 }
 
 export function updateSubscriptionInfo(
-  provider: LLMProviderName,
-  tier: SubscriptionTier,
-  metadata: Record<string, any>
+  _provider: LLMProviderName,
+  _tier: SubscriptionTier,
+  _metadata: Record<string, any>
 ): void {
-  const db = getDb();
-  db.prepare(
-    `UPDATE oauth_tokens SET subscription_tier = ?, subscription_metadata = ?, updated_at = datetime('now') WHERE provider = ?`
-  ).run(tier, JSON.stringify(metadata), provider);
+  // no-op
 }
 
 export function getAllOAuthStatus(): Record<
   string,
   { connected: boolean; tier: SubscriptionTier | null }
 > {
-  const db = getDb();
-  const rows = db
-    .prepare("SELECT provider, subscription_tier FROM oauth_tokens")
-    .all() as { provider: string; subscription_tier: string }[];
-
-  const status: Record<
-    string,
-    { connected: boolean; tier: SubscriptionTier | null }
-  > = {
+  return {
     openai: { connected: false, tier: null },
     anthropic: { connected: false, tier: null },
     gemini: { connected: false, tier: null },
     ollama: { connected: false, tier: null },
   };
-
-  for (const row of rows) {
-    status[row.provider] = {
-      connected: true,
-      tier: (row.subscription_tier || "unknown") as SubscriptionTier,
-    };
-  }
-
-  return status;
 }

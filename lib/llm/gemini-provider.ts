@@ -361,7 +361,8 @@ export class GeminiProvider extends BaseLLMProvider {
   async embed(req: EmbeddingRequest): Promise<EmbeddingResponse> {
     if (this.accessToken) {
       const model = req.model || "gemini-embedding-001";
-      const url = this.modelUrl(model, "embedContent");
+      const urlResult = this.modelUrl(model, "embedContent");
+      const url = Array.isArray(urlResult) ? urlResult[0] : urlResult;
       const response = await fetch(url, {
         method: "POST",
         headers: this.authHeaders(),

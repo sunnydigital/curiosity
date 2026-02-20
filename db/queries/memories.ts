@@ -1,32 +1,27 @@
 import { getDb } from "@/db";
 import { v4 as uuidv4 } from "uuid";
-import { embeddingToBuffer, bufferToEmbedding, cosineSimilarity } from "@/lib/utils";
+import { cosineSimilarity } from "@/lib/utils";
 import type { Memory } from "@/types";
 
-interface MemoryRow {
-  id: string;
-  content: string;
-  source_chat_id: string | null;
-  source_message_id: string | null;
-  embedding: Buffer;
-  embedding_model: string | null;
-  created_at: string;
-  last_accessed_at: string;
-  access_count: number;
-  strength: number;
+function embeddingToBase64(embedding: number[]): string {
+  const buf = Buffer.from(new Float32Array(embedding).buffer);
+  return buf.toString('base64');
 }
 
-function rowToMemory(row: MemoryRow): Memory {
+function base64ToEmbedding(b64: string): Float32Array {
+  const buf = Buffer.from(b64, 'base64');
+  return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
+}
+
+function rowToMemory(row: any): Memory {
   return {
     id: row.id,
     content: row.content,
     sourceChatId: row.source_chat_id,
     sourceMessageId: row.source_message_id,
-    embedding: new Float32Array(
-      row.embedding.buffer,
-      row.embedding.byteOffset,
-      row.embedding.byteLength / 4
-    ),
+    embedding: typeof row.embedding === 'string'
+      ? base64ToEmbedding(row.embedding)
+      : new Float32Array(0),
     embeddingModel: row.embedding_model,
     createdAt: row.created_at,
     lastAccessedAt: row.last_accessed_at,
@@ -35,49 +30,52 @@ function rowToMemory(row: MemoryRow): Memory {
   };
 }
 
-export function createMemory(params: {
+export async function createMemory(params: {
   content: string;
   sourceChatId?: string | null;
   sourceMessageId?: string | null;
   embedding: number[];
   embeddingModel?: string | null;
-}): Memory {
+  userId?: string | null;
+}): Promise<Memory> {
   const db = getDb();
   const id = uuidv4();
-  const embeddingBuf = embeddingToBuffer(params.embedding);
 
-  db.prepare(
-    `INSERT INTO memories (id, content, source_chat_id, source_message_id, embedding, embedding_model)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    params.content,
-    params.sourceChatId || null,
-    params.sourceMessageId || null,
-    embeddingBuf,
-    params.embeddingModel || null
-  );
+  const { data, error } = await db
+    .from('memories')
+    .insert({
+      id,
+      content: params.content,
+      source_chat_id: params.sourceChatId || null,
+      source_message_id: params.sourceMessageId || null,
+      embedding: embeddingToBase64(params.embedding),
+      embedding_model: params.embeddingModel || null,
+      user_id: params.userId || null,
+    })
+    .select()
+    .single();
 
-  return getMemory(id)!;
+  if (error) throw error;
+  return rowToMemory(data);
 }
 
-export function getMemory(id: string): Memory | null {
+export async function getMemory(id: string): Promise<Memory | null> {
   const db = getDb();
-  const row = db
-    .prepare("SELECT * FROM memories WHERE id = ?")
-    .get(id) as MemoryRow | undefined;
-  return row ? rowToMemory(row) : null;
+  const { data, error } = await db.from('memories').select('*').eq('id', id).single();
+  if (error || !data) return null;
+  return rowToMemory(data);
 }
 
-export function getAllMemories(): Memory[] {
+export async function getAllMemories(userId?: string | null): Promise<Memory[]> {
   const db = getDb();
-  const rows = db
-    .prepare("SELECT * FROM memories ORDER BY created_at DESC")
-    .all() as MemoryRow[];
-  return rows.map(rowToMemory);
+  let q = db.from('memories').select('*').order('created_at', { ascending: false });
+  if (userId) q = q.eq('user_id', userId);
+  const { data, error } = await q;
+  if (error || !data) return [];
+  return data.map(rowToMemory);
 }
 
-export function searchMemories(
+export async function searchMemories(
   queryEmbedding: number[],
   options: {
     lambda: number;
@@ -85,32 +83,22 @@ export function searchMemories(
     temporalWeight: number;
     topK: number;
     embeddingModel?: string | null;
+    userId?: string | null;
   }
-): (Memory & { similarityScore: number; temporalScore: number; combinedScore: number })[] {
-  const memories = getAllMemories();
+): Promise<(Memory & { similarityScore: number; temporalScore: number; combinedScore: number })[]> {
+  const memories = await getAllMemories(options.userId);
   const now = Date.now();
 
-  // Only compare memories that share the same embedding model (or legacy NULL)
   const compatible = options.embeddingModel
-    ? memories.filter(
-        (m) => m.embeddingModel === options.embeddingModel || m.embeddingModel === null
-      )
+    ? memories.filter(m => m.embeddingModel === options.embeddingModel || m.embeddingModel === null)
     : memories;
 
   const scored = compatible.map((memory) => {
     const memEmbedding = Array.from(memory.embedding);
     const similarityScore = cosineSimilarity(queryEmbedding, memEmbedding);
-
-    const ageSeconds =
-      (now - new Date(memory.lastAccessedAt).getTime()) / 1000;
-    const temporalScore = Math.exp(
-      (-options.lambda * ageSeconds) / memory.strength
-    );
-
-    const combinedScore =
-      options.similarityWeight * similarityScore +
-      options.temporalWeight * temporalScore;
-
+    const ageSeconds = (now - new Date(memory.lastAccessedAt).getTime()) / 1000;
+    const temporalScore = Math.exp((-options.lambda * ageSeconds) / memory.strength);
+    const combinedScore = options.similarityWeight * similarityScore + options.temporalWeight * temporalScore;
     return { ...memory, similarityScore, temporalScore, combinedScore };
   });
 
@@ -118,72 +106,67 @@ export function searchMemories(
   return scored.slice(0, options.topK);
 }
 
-export function updateMemoryAccess(id: string): void {
-  const db = getDb();
-  const memory = getMemory(id);
+export async function updateMemoryAccess(id: string): Promise<void> {
+  const memory = await getMemory(id);
   if (!memory) return;
-
   const newStrength = Math.min(1.0, memory.strength + 0.1 * (1 - memory.strength));
-
-  db.prepare(
-    `UPDATE memories SET
-     last_accessed_at = datetime('now'),
-     access_count = access_count + 1,
-     strength = ?
-     WHERE id = ?`
-  ).run(newStrength, id);
+  const db = getDb();
+  await db.from('memories').update({
+    last_accessed_at: new Date().toISOString(),
+    access_count: memory.accessCount + 1,
+    strength: newStrength,
+  }).eq('id', id);
 }
 
-export function deleteMemory(id: string): void {
+export async function deleteMemory(id: string): Promise<void> {
   const db = getDb();
-  db.prepare("DELETE FROM memories WHERE id = ?").run(id);
+  await db.from('memories').delete().eq('id', id);
 }
 
-export function deleteAllMemories(): void {
+export async function deleteAllMemories(userId?: string): Promise<void> {
   const db = getDb();
-  db.prepare("DELETE FROM memories").run();
+  let q = db.from('memories').delete();
+  if (userId) q = q.eq('user_id', userId);
+  else q = q.neq('id', ''); // delete all
+  await q;
 }
 
-export function deleteMemoriesByEmbeddingModel(model: string | null): void {
+export async function deleteMemoriesByEmbeddingModel(model: string | null, userId?: string): Promise<void> {
   const db = getDb();
+  let q = db.from('memories').delete();
   if (model === null) {
-    db.prepare("DELETE FROM memories WHERE embedding_model IS NULL").run();
+    q = q.is('embedding_model', null);
   } else {
-    db.prepare("DELETE FROM memories WHERE embedding_model = ?").run(model);
+    q = q.eq('embedding_model', model);
   }
+  if (userId) q = q.eq('user_id', userId);
+  await q;
 }
 
-export function getDistinctEmbeddingModels(): (string | null)[] {
-  const db = getDb();
-  const rows = db
-    .prepare("SELECT DISTINCT embedding_model FROM memories ORDER BY embedding_model")
-    .all() as { embedding_model: string | null }[];
-  return rows.map((r) => r.embedding_model);
+export async function getDistinctEmbeddingModels(userId?: string): Promise<(string | null)[]> {
+  const memories = await getAllMemories(userId);
+  const models = new Set(memories.map(m => m.embeddingModel));
+  return Array.from(models);
 }
 
-export function updateMemoryEmbedding(
-  id: string,
-  embedding: number[],
-  embeddingModel: string
-): void {
+export async function updateMemoryEmbedding(id: string, embedding: number[], embeddingModel: string): Promise<void> {
   const db = getDb();
-  const embeddingBuf = embeddingToBuffer(embedding);
-  db.prepare(
-    "UPDATE memories SET embedding = ?, embedding_model = ? WHERE id = ?"
-  ).run(embeddingBuf, embeddingModel, id);
+  await db.from('memories').update({
+    embedding: embeddingToBase64(embedding),
+    embedding_model: embeddingModel,
+  }).eq('id', id);
 }
 
-export function getMemoriesByEmbeddingModel(model: string | null): Memory[] {
+export async function getMemoriesByEmbeddingModel(model: string | null, userId?: string): Promise<Memory[]> {
   const db = getDb();
-  let rows: MemoryRow[];
+  let q = db.from('memories').select('*').order('created_at', { ascending: false });
   if (model === null) {
-    rows = db
-      .prepare("SELECT * FROM memories WHERE embedding_model IS NULL ORDER BY created_at DESC")
-      .all() as MemoryRow[];
+    q = q.is('embedding_model', null);
   } else {
-    rows = db
-      .prepare("SELECT * FROM memories WHERE embedding_model = ? ORDER BY created_at DESC")
-      .all(model) as MemoryRow[];
+    q = q.eq('embedding_model', model);
   }
-  return rows.map(rowToMemory);
+  if (userId) q = q.eq('user_id', userId);
+  const { data, error } = await q;
+  if (error || !data) return [];
+  return data.map(rowToMemory);
 }

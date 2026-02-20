@@ -1,10 +1,12 @@
 import { NextRequest } from "next/server";
-import { getSettings } from "@/db/queries/settings";
+import { getSettingsAsync } from "@/db/queries/settings";
 import { getProviderAsync, getPreviewProviderAsync } from "@/lib/llm/provider-registry";
 import { FailoverExecutor } from "@/lib/llm/failover";
 import { createMessage, getPathToRoot } from "@/db/queries/messages";
 import { touchChat, renameChat, getChat } from "@/db/queries/chats";
 import { getMemoryContext, onNewExchange } from "@/lib/memory/memory-manager";
+import { getAuthContext } from "@/lib/auth/helpers";
+import { checkRateLimit, incrementRateLimit } from "@/db/queries/rate-limits";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/constants";
 import type { LLMMessage, FailoverEvent } from "@/types";
 
@@ -12,39 +14,55 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { chatId, content, parentId, image } = body;
 
-  const userMessage = createMessage({
+  // Rate limit check for anonymous users
+  const auth = await getAuthContext(request);
+  if (!auth.userId) {
+    const ip = auth.anonIp || '127.0.0.1';
+    const rateLimit = await checkRateLimit(ip);
+    if (rateLimit.isLimited) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                type: "error",
+                error: "You've reached the free message limit (20 messages). Please sign up to continue chatting!",
+                rateLimited: true,
+              })}\n\n`
+            )
+          );
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        },
+      });
+    }
+    await incrementRateLimit(ip);
+  }
+
+  const userMessage = await createMessage({
     chatId,
     parentId: parentId || null,
     role: "user",
     content,
   });
 
-  touchChat(chatId);
+  await touchChat(chatId);
 
-  const settings = getSettings();
+  const settings = await getSettingsAsync();
 
-  console.log(`[Stream API] Settings loaded:`, {
-    activeProvider: settings.activeProvider,
-    activeModel: settings.activeModel,
-    failoverEnabled: settings.failoverEnabled,
-    failoverChain: settings.failoverChain,
-    openaiAuthMode: settings.openaiAuthMode,
-    anthropicAuthMode: settings.anthropicAuthMode,
-    geminiAuthMode: settings.geminiAuthMode,
-    hasOpenAIKey: !!settings.openaiApiKey,
-    hasAnthropicKey: !!settings.anthropicApiKey,
-    hasGeminiKey: !!settings.geminiApiKey,
-    ollamaBaseUrl: settings.ollamaBaseUrl
-  });
+  const contextMessages = await getPathToRoot(userMessage.id);
 
-  const contextMessages = getPathToRoot(userMessage.id);
-
-  // Build LLM messages with memory context
   const llmMessages: LLMMessage[] = [
     { role: "system", content: DEFAULT_SYSTEM_PROMPT },
   ];
 
-  // Inject memory context if enabled
   try {
     const memoryContext = await getMemoryContext(content);
     if (memoryContext) {
@@ -61,7 +79,6 @@ export async function POST(request: NextRequest) {
     }))
   );
 
-  // Attach image to the last user message if provided
   if (image && llmMessages.length > 0) {
     const lastMsg = llmMessages[llmMessages.length - 1];
     if (lastMsg.role === "user") {
@@ -81,13 +98,9 @@ export async function POST(request: NextRequest) {
           )
         );
 
-        // Check if we need to auto-title after streaming
-        const chat = getChat(chatId);
+        const chat = await getChat(chatId);
         const needsAutoTitle = chat && chat.title === "New Chat";
 
-        // For non-Ollama providers, generate title early so sidebar updates immediately.
-        // For Ollama, defer until after streaming to avoid blocking (Ollama handles
-        // one request at a time, so a pre-stream complete() would stall the response).
         if (needsAutoTitle && settings.activeProvider !== "ollama") {
           const titleMessages: LLMMessage[] = [
             {
@@ -116,13 +129,11 @@ export async function POST(request: NextRequest) {
                 maxTokens: 30,
               });
               title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
-            } catch {
-              // Title generation is best-effort
-            }
+            } catch {}
           }
 
           if (title) {
-            renameChat(chatId, title);
+            await renameChat(chatId, title);
             controller.enqueue(
               encoder.encode(
                 `data: ${JSON.stringify({ type: "title_updated", title })}\n\n`
@@ -133,27 +144,22 @@ export async function POST(request: NextRequest) {
 
         let actualProvider = settings.activeProvider;
         let actualModel = settings.activeModel;
-        let gen: AsyncGenerator<{ content: string; done: boolean }, void, unknown>;
 
         if (settings.failoverEnabled && settings.failoverChain.length > 0) {
-          // Use failover executor
           const executor = new FailoverExecutor({
             settings,
             onFailover: (evt: FailoverEvent) => {
               controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify(evt)}\n\n`
-                )
+                encoder.encode(`data: ${JSON.stringify(evt)}\n\n`)
               );
             },
           });
 
-          gen = executor.stream({
+          const gen = executor.stream({
             model: settings.activeModel,
             messages: llmMessages,
           });
 
-          // We need to iterate and track the actual provider after completion
           for await (const chunk of gen) {
             if (chunk.content) {
               fullContent += chunk.content;
@@ -170,9 +176,8 @@ export async function POST(request: NextRequest) {
             }
           }
         } else {
-          // Direct provider call (no failover)
           const provider = await getProviderAsync(settings.activeProvider, settings);
-          gen = provider.stream({
+          const gen = provider.stream({
             model: settings.activeModel,
             messages: llmMessages,
           });
@@ -189,9 +194,7 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        console.log(`[Stream] Streaming complete. fullContent length: ${fullContent.length}, provider: ${actualProvider}, model: ${actualModel}`);
-
-        const assistantMessage = createMessage({
+        const assistantMessage = await createMessage({
           chatId,
           parentId: userMessage.id,
           role: "assistant",
@@ -206,12 +209,11 @@ export async function POST(request: NextRequest) {
               type: "done",
               message: assistantMessage,
               actualProvider,
-              actualModel
+              actualModel,
             })}\n\n`
           )
         );
 
-        // For Ollama, generate title after streaming so we don't block the response
         if (needsAutoTitle && settings.activeProvider === "ollama") {
           const titleMessages: LLMMessage[] = [
             {
@@ -240,13 +242,11 @@ export async function POST(request: NextRequest) {
                 maxTokens: 500,
               });
               title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
-            } catch {
-              // Title generation is best-effort
-            }
+            } catch {}
           }
 
           if (title) {
-            renameChat(chatId, title);
+            await renameChat(chatId, title);
             controller.enqueue(
               encoder.encode(
                 `data: ${JSON.stringify({ type: "title_updated", title })}\n\n`
@@ -255,7 +255,6 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Extract facts for memory — await so it completes before the stream closes
         try {
           await onNewExchange(chatId, userMessage.id, content, fullContent);
         } catch (err) {
@@ -264,20 +263,11 @@ export async function POST(request: NextRequest) {
 
         controller.close();
       } catch (error: any) {
-        // Extract a readable error message from various error formats
         let errorMessage = "An unexpected error occurred";
-
-        // Handle SDK errors (Anthropic, OpenAI) with status + nested error body
         if (error.status && error.error?.message) {
           errorMessage = `${error.error.message} (${error.status})`;
-        } else if (error.status && error.message) {
-          errorMessage = `${error.message}`;
-        } else if (error.error?.message) {
-          errorMessage = error.error.message;
         } else if (error.message) {
           errorMessage = error.message;
-        } else if (typeof error === "string") {
-          errorMessage = error;
         }
 
         controller.enqueue(

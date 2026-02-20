@@ -1,4 +1,4 @@
-import { getSettings } from "@/db/queries/settings";
+import { getSettingsAsync } from "@/db/queries/settings";
 import { searchMemories, updateMemoryAccess } from "@/db/queries/memories";
 import { searchKBEntries } from "@/db/queries/knowledge-bases";
 import { generateEmbedding } from "@/lib/llm/embedding";
@@ -14,14 +14,13 @@ export async function retrieveRelevantMemories(
   queryText: string,
   topK: number = MEMORY_TOP_K
 ): Promise<RetrievedMemory[]> {
-  const settings = getSettings();
+  const settings = await getSettingsAsync();
   if (!settings.memoryEnabled) return [];
 
   try {
     const { embedding: queryEmbedding, model: queryModel } = await generateEmbedding(queryText);
 
-    // Search general memories with time decay (only compatible embeddings)
-    const memories = searchMemories(queryEmbedding, {
+    const memories = await searchMemories(queryEmbedding, {
       lambda: settings.decayLambda,
       similarityWeight: settings.similarityWeight,
       temporalWeight: settings.temporalWeight,
@@ -29,8 +28,7 @@ export async function retrieveRelevantMemories(
       embeddingModel: queryModel,
     });
 
-    // Search knowledge base entries (no decay, only compatible embeddings)
-    const kbEntries = searchKBEntries(queryEmbedding, topK, undefined, queryModel);
+    const kbEntries = await searchKBEntries(queryEmbedding, topK, undefined, queryModel);
 
     // Merge and deduplicate
     const results: RetrievedMemory[] = [];
@@ -41,8 +39,7 @@ export async function retrieveRelevantMemories(
         score: mem.combinedScore,
         source: "memory",
       });
-      // Update access metadata
-      updateMemoryAccess(mem.id);
+      await updateMemoryAccess(mem.id);
     }
 
     for (const entry of kbEntries) {

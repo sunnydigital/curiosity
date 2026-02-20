@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAllMemories, deleteMemory, deleteAllMemories, deleteMemoriesByEmbeddingModel } from "@/db/queries/memories";
 import { getCurrentEmbeddingModel } from "@/lib/llm/embedding";
 import { retrieveRelevantMemories } from "@/lib/memory/memory-retrieval";
+import { getAuthContext } from "@/lib/auth/helpers";
 
 export async function GET(request: NextRequest) {
+  const auth = await getAuthContext(request);
   const query = request.nextUrl.searchParams.get("q");
 
   if (query) {
@@ -15,7 +17,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const memories = getAllMemories();
+  const memories = await getAllMemories(auth.userId);
   const currentModel = getCurrentEmbeddingModel();
   return NextResponse.json({
     currentEmbeddingModel: currentModel,
@@ -34,17 +36,17 @@ export async function GET(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const auth = await getAuthContext(request);
     const body = await request.json();
     if (body.all) {
-      deleteAllMemories();
+      await deleteAllMemories(auth.userId || undefined);
     } else if (body.embeddingModel !== undefined) {
-      deleteMemoriesByEmbeddingModel(body.embeddingModel);
+      await deleteMemoriesByEmbeddingModel(body.embeddingModel, auth.userId || undefined);
     } else {
-      deleteMemory(body.id);
+      await deleteMemory(body.id);
     }
     return NextResponse.json({ success: true });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-

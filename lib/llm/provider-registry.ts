@@ -1,4 +1,4 @@
-import { getSettings } from "@/db/queries/settings";
+import { getSettings, getSettingsAsync } from "@/db/queries/settings";
 import { BaseLLMProvider } from "./types";
 import { OpenAIProvider } from "./openai-provider";
 import { AnthropicProvider } from "./anthropic-provider";

@@ -37,7 +37,8 @@
     "@tailwindcss/typography": "^0.5.19",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@xyflow/react": "^12.10.0",
-    "better-sqlite3": "^12.6.2",
+    "@supabase/ssr": "^0.6.1",
+    "@supabase/supabase-js": "^2.49.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "katex": "^0.16.28",
@@ -57,7 +58,6 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.18",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.1.0",
     "@types/react": "^19.2.10",
     "@types/react-dom": "^19.2.3",

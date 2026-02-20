@@ -7,7 +7,7 @@ export async function DELETE(
 ) {
   const { chatId, messageId } = await params;
 
-  const message = getMessage(messageId);
+  const message = await getMessage(messageId);
   if (!message) {
     return Response.json({ error: "Message not found" }, { status: 404 });
   }
@@ -16,7 +16,7 @@ export async function DELETE(
     return Response.json({ error: "Message does not belong to this chat" }, { status: 400 });
   }
 
-  const deleted = deleteMessage(messageId);
+  const deleted = await deleteMessage(messageId);
   if (!deleted) {
     return Response.json(
       { error: "Cannot delete message with children" },

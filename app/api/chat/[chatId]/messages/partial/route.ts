@@ -16,7 +16,7 @@ export async function POST(
     );
   }
 
-  const message = createMessage({
+  const message = await createMessage({
     chatId,
     parentId,
     role: "assistant",

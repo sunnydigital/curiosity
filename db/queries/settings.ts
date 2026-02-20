@@ -1,271 +1,150 @@
 import { getDb } from "@/db";
-import { encrypt, decrypt } from "@/lib/crypto";
-import type { Settings, LLMProviderName, AuthMode, EmbeddingMode, LocalEmbeddingBackend } from "@/types";
+import type { Settings, LLMProviderName } from "@/types";
 
-interface SettingsRow {
-  active_provider: string;
-  active_model: string;
-  openai_api_key: string | null;
-  anthropic_api_key: string | null;
-  gemini_api_key: string | null;
-  ollama_base_url: string;
-  memory_enabled: number;
-  embedding_provider: string;
-  embedding_model: string;
-  decay_lambda: number;
-  similarity_weight: number;
-  temporal_weight: number;
-  preview_provider: string;
-  preview_model: string;
-  summary_sentences: number;
-  openai_auth_mode: string;
-  anthropic_auth_mode: string;
-  gemini_auth_mode: string;
-  failover_enabled: number;
-  failover_chain: string;
-  openai_oauth_client_id: string | null;
-  openai_oauth_client_secret: string | null;
-  anthropic_oauth_client_id: string | null;
-  anthropic_oauth_client_secret: string | null;
-  gemini_oauth_client_id: string | null;
-  gemini_oauth_client_secret: string | null;
-  default_openai_model: string;
-  default_anthropic_model: string;
-  default_gemini_model: string;
-  default_ollama_model: string;
-  embedding_provider_override: number;
-  preview_provider_override: number;
-  preview_openai_model: string;
-  preview_anthropic_model: string;
-  preview_gemini_model: string;
-  preview_ollama_model: string;
-  embedding_mode: string;
-  local_embedding_backend: string;
-  local_embedding_model: string;
-}
+// Admin settings are a singleton row — the app uses admin-configured keys for all users
 
 export function getSettings(): Settings {
-  const db = getDb();
-  const row = db.prepare("SELECT * FROM settings WHERE id = 1").get() as SettingsRow;
+  // This is called synchronously in many places, but Supabase is async.
+  // We cache the settings and provide an async initializer.
+  if (cachedSettings) return cachedSettings;
+  throw new Error("Settings not initialized. Call await initSettings() first.");
+}
 
-  let failoverChain: LLMProviderName[] = [];
-  try {
-    failoverChain = JSON.parse(row.failover_chain || "[]");
-  } catch {
-    failoverChain = [];
+let cachedSettings: Settings | null = null;
+
+export async function initSettings(): Promise<Settings> {
+  if (cachedSettings) return cachedSettings;
+  const db = getDb();
+  const { data, error } = await db
+    .from('admin_settings')
+    .select('*')
+    .eq('id', 1)
+    .single();
+
+  if (error || !data) {
+    // Return sensible defaults if no row exists yet
+    cachedSettings = getDefaultSettings();
+    return cachedSettings;
   }
 
+  cachedSettings = rowToSettings(data);
+  return cachedSettings;
+}
+
+function getDefaultSettings(): Settings {
   return {
-    activeProvider: row.active_provider as LLMProviderName,
-    activeModel: row.active_model,
-    openaiApiKey: row.openai_api_key ? decrypt(row.openai_api_key) : null,
-    anthropicApiKey: row.anthropic_api_key ? decrypt(row.anthropic_api_key) : null,
-    geminiApiKey: row.gemini_api_key ? decrypt(row.gemini_api_key) : null,
-    ollamaBaseUrl: row.ollama_base_url,
-    memoryEnabled: row.memory_enabled === 1,
-    embeddingMode: (row.embedding_mode || "online") as EmbeddingMode,
-    embeddingProvider: row.embedding_provider as LLMProviderName,
-    embeddingModel: row.embedding_model,
-    embeddingProviderOverride: row.embedding_provider_override === 1,
-    localEmbeddingBackend: (row.local_embedding_backend || "transformers") as LocalEmbeddingBackend,
-    localEmbeddingModel: row.local_embedding_model || "nomic-ai/nomic-embed-text-v1.5",
-    decayLambda: row.decay_lambda,
-    similarityWeight: row.similarity_weight,
-    temporalWeight: row.temporal_weight,
-    previewProvider: row.preview_provider as LLMProviderName,
-    previewModel: row.preview_model,
-    previewProviderOverride: row.preview_provider_override === 1,
-    summarySentences: row.summary_sentences,
-    openaiAuthMode: (row.openai_auth_mode || "api_key") as AuthMode,
-    anthropicAuthMode: (row.anthropic_auth_mode || "api_key") as AuthMode,
-    geminiAuthMode: (row.gemini_auth_mode || "api_key") as AuthMode,
-    openaiOauthClientId: row.openai_oauth_client_id ? decrypt(row.openai_oauth_client_id) : null,
-    openaiOauthClientSecret: row.openai_oauth_client_secret ? decrypt(row.openai_oauth_client_secret) : null,
-    anthropicOauthClientId: row.anthropic_oauth_client_id ? decrypt(row.anthropic_oauth_client_id) : null,
-    anthropicOauthClientSecret: row.anthropic_oauth_client_secret ? decrypt(row.anthropic_oauth_client_secret) : null,
-    geminiOauthClientId: row.gemini_oauth_client_id ? decrypt(row.gemini_oauth_client_id) : null,
-    geminiOauthClientSecret: row.gemini_oauth_client_secret ? decrypt(row.gemini_oauth_client_secret) : null,
-    defaultOpenaiModel: row.default_openai_model || "gpt-5.2-pro",
-    defaultAnthropicModel: row.default_anthropic_model || "claude-opus-4-6",
-    defaultGeminiModel: row.default_gemini_model || "gemini-3-pro-preview",
-    defaultOllamaModel: row.default_ollama_model || "qwen3-vl:30b",
-    previewOpenaiModel: row.preview_openai_model || "gpt-5-mini",
-    previewAnthropicModel: row.preview_anthropic_model || "claude-haiku-4-5",
-    previewGeminiModel: row.preview_gemini_model || "gemini-3-flash-preview",
-    previewOllamaModel: row.preview_ollama_model || "qwen3-vl:30b",
-    failoverEnabled: row.failover_enabled === 1,
-    failoverChain,
+    activeProvider: 'anthropic' as LLMProviderName,
+    activeModel: 'claude-sonnet-4-5-20250929',
+    openaiApiKey: null,
+    anthropicApiKey: null,
+    geminiApiKey: null,
+    ollamaBaseUrl: 'http://localhost:11434',
+    memoryEnabled: true,
+    embeddingMode: 'online' as any,
+    embeddingProvider: 'openai' as LLMProviderName,
+    embeddingModel: 'text-embedding-3-small',
+    embeddingProviderOverride: false,
+    localEmbeddingBackend: 'transformers' as any,
+    localEmbeddingModel: 'nomic-ai/nomic-embed-text-v1.5',
+    decayLambda: 0.0000001,
+    similarityWeight: 0.7,
+    temporalWeight: 0.3,
+    previewProvider: 'anthropic' as LLMProviderName,
+    previewModel: 'claude-haiku-4-5',
+    previewProviderOverride: false,
+    summarySentences: 2,
+    openaiAuthMode: 'api_key' as any,
+    anthropicAuthMode: 'api_key' as any,
+    geminiAuthMode: 'api_key' as any,
+    openaiOauthClientId: null,
+    openaiOauthClientSecret: null,
+    anthropicOauthClientId: null,
+    anthropicOauthClientSecret: null,
+    geminiOauthClientId: null,
+    geminiOauthClientSecret: null,
+    defaultOpenaiModel: 'gpt-5.2-pro',
+    defaultAnthropicModel: 'claude-opus-4-6',
+    defaultGeminiModel: 'gemini-3-pro-preview',
+    defaultOllamaModel: 'qwen3-vl:30b',
+    previewOpenaiModel: 'gpt-5-mini',
+    previewAnthropicModel: 'claude-haiku-4-5',
+    previewGeminiModel: 'gemini-3-flash-preview',
+    previewOllamaModel: 'qwen3-vl:30b',
+    failoverEnabled: false,
+    failoverChain: [],
   };
 }
 
-export function updateSettings(settings: Partial<Settings>): void {
+function rowToSettings(row: any): Settings {
+  return {
+    activeProvider: row.active_provider as LLMProviderName,
+    activeModel: row.active_model,
+    openaiApiKey: row.openai_api_key || null,
+    anthropicApiKey: row.anthropic_api_key || null,
+    geminiApiKey: row.gemini_api_key || null,
+    ollamaBaseUrl: row.ollama_base_url || 'http://localhost:11434',
+    memoryEnabled: true,
+    embeddingMode: 'online' as any,
+    embeddingProvider: (row.embedding_provider || 'openai') as LLMProviderName,
+    embeddingModel: row.embedding_model || 'text-embedding-3-small',
+    embeddingProviderOverride: false,
+    localEmbeddingBackend: 'transformers' as any,
+    localEmbeddingModel: 'nomic-ai/nomic-embed-text-v1.5',
+    decayLambda: 0.0000001,
+    similarityWeight: 0.7,
+    temporalWeight: 0.3,
+    previewProvider: (row.preview_provider || 'anthropic') as LLMProviderName,
+    previewModel: row.preview_model || 'claude-haiku-4-5',
+    previewProviderOverride: false,
+    summarySentences: 2,
+    openaiAuthMode: 'api_key' as any,
+    anthropicAuthMode: 'api_key' as any,
+    geminiAuthMode: 'api_key' as any,
+    openaiOauthClientId: null,
+    openaiOauthClientSecret: null,
+    anthropicOauthClientId: null,
+    anthropicOauthClientSecret: null,
+    geminiOauthClientId: null,
+    geminiOauthClientSecret: null,
+    defaultOpenaiModel: 'gpt-5.2-pro',
+    defaultAnthropicModel: 'claude-opus-4-6',
+    defaultGeminiModel: 'gemini-3-pro-preview',
+    defaultOllamaModel: 'qwen3-vl:30b',
+    previewOpenaiModel: 'gpt-5-mini',
+    previewAnthropicModel: 'claude-haiku-4-5',
+    previewGeminiModel: 'gemini-3-flash-preview',
+    previewOllamaModel: 'qwen3-vl:30b',
+    failoverEnabled: false,
+    failoverChain: [],
+  };
+}
+
+export async function getSettingsAsync(): Promise<Settings> {
+  return initSettings();
+}
+
+export async function updateSettings(settings: Partial<Settings>): Promise<void> {
   const db = getDb();
-  const updates: string[] = [];
-  const values: any[] = [];
+  const updates: Record<string, any> = { updated_at: new Date().toISOString() };
 
-  if (settings.activeProvider !== undefined) {
-    updates.push("active_provider = ?");
-    values.push(settings.activeProvider);
-  }
-  if (settings.activeModel !== undefined) {
-    updates.push("active_model = ?");
-    values.push(settings.activeModel);
-  }
-  if (settings.openaiApiKey !== undefined) {
-    updates.push("openai_api_key = ?");
-    values.push(settings.openaiApiKey ? encrypt(settings.openaiApiKey) : null);
-  }
-  if (settings.anthropicApiKey !== undefined) {
-    updates.push("anthropic_api_key = ?");
-    values.push(settings.anthropicApiKey ? encrypt(settings.anthropicApiKey) : null);
-  }
-  if (settings.geminiApiKey !== undefined) {
-    updates.push("gemini_api_key = ?");
-    values.push(settings.geminiApiKey ? encrypt(settings.geminiApiKey) : null);
-  }
-  if (settings.ollamaBaseUrl !== undefined) {
-    updates.push("ollama_base_url = ?");
-    values.push(settings.ollamaBaseUrl);
-  }
-  if (settings.memoryEnabled !== undefined) {
-    updates.push("memory_enabled = ?");
-    values.push(settings.memoryEnabled ? 1 : 0);
-  }
-  if (settings.embeddingMode !== undefined) {
-    updates.push("embedding_mode = ?");
-    values.push(settings.embeddingMode);
-  }
-  if (settings.embeddingProvider !== undefined) {
-    updates.push("embedding_provider = ?");
-    values.push(settings.embeddingProvider);
-  }
-  if (settings.embeddingModel !== undefined) {
-    updates.push("embedding_model = ?");
-    values.push(settings.embeddingModel);
-  }
-  if (settings.localEmbeddingBackend !== undefined) {
-    updates.push("local_embedding_backend = ?");
-    values.push(settings.localEmbeddingBackend);
-  }
-  if (settings.localEmbeddingModel !== undefined) {
-    updates.push("local_embedding_model = ?");
-    values.push(settings.localEmbeddingModel);
-  }
-  if (settings.decayLambda !== undefined) {
-    updates.push("decay_lambda = ?");
-    values.push(settings.decayLambda);
-  }
-  if (settings.similarityWeight !== undefined) {
-    updates.push("similarity_weight = ?");
-    values.push(settings.similarityWeight);
-  }
-  if (settings.temporalWeight !== undefined) {
-    updates.push("temporal_weight = ?");
-    values.push(settings.temporalWeight);
-  }
-  if (settings.previewProvider !== undefined) {
-    updates.push("preview_provider = ?");
-    values.push(settings.previewProvider);
-  }
-  if (settings.previewModel !== undefined) {
-    updates.push("preview_model = ?");
-    values.push(settings.previewModel);
-  }
-  if (settings.summarySentences !== undefined) {
-    updates.push("summary_sentences = ?");
-    values.push(settings.summarySentences);
-  }
-  if (settings.openaiAuthMode !== undefined) {
-    updates.push("openai_auth_mode = ?");
-    values.push(settings.openaiAuthMode);
-  }
-  if (settings.anthropicAuthMode !== undefined) {
-    updates.push("anthropic_auth_mode = ?");
-    values.push(settings.anthropicAuthMode);
-  }
-  if (settings.geminiAuthMode !== undefined) {
-    updates.push("gemini_auth_mode = ?");
-    values.push(settings.geminiAuthMode);
-  }
-  if (settings.openaiOauthClientId !== undefined) {
-    updates.push("openai_oauth_client_id = ?");
-    values.push(settings.openaiOauthClientId ? encrypt(settings.openaiOauthClientId) : null);
-  }
-  if (settings.openaiOauthClientSecret !== undefined) {
-    updates.push("openai_oauth_client_secret = ?");
-    values.push(settings.openaiOauthClientSecret ? encrypt(settings.openaiOauthClientSecret) : null);
-  }
-  if (settings.anthropicOauthClientId !== undefined) {
-    updates.push("anthropic_oauth_client_id = ?");
-    values.push(settings.anthropicOauthClientId ? encrypt(settings.anthropicOauthClientId) : null);
-  }
-  if (settings.anthropicOauthClientSecret !== undefined) {
-    updates.push("anthropic_oauth_client_secret = ?");
-    values.push(settings.anthropicOauthClientSecret ? encrypt(settings.anthropicOauthClientSecret) : null);
-  }
-  if (settings.geminiOauthClientId !== undefined) {
-    updates.push("gemini_oauth_client_id = ?");
-    values.push(settings.geminiOauthClientId ? encrypt(settings.geminiOauthClientId) : null);
-  }
-  if (settings.geminiOauthClientSecret !== undefined) {
-    updates.push("gemini_oauth_client_secret = ?");
-    values.push(settings.geminiOauthClientSecret ? encrypt(settings.geminiOauthClientSecret) : null);
-  }
-  if (settings.defaultOpenaiModel !== undefined) {
-    updates.push("default_openai_model = ?");
-    values.push(settings.defaultOpenaiModel);
-  }
-  if (settings.defaultAnthropicModel !== undefined) {
-    updates.push("default_anthropic_model = ?");
-    values.push(settings.defaultAnthropicModel);
-  }
-  if (settings.defaultGeminiModel !== undefined) {
-    updates.push("default_gemini_model = ?");
-    values.push(settings.defaultGeminiModel);
-  }
-  if (settings.defaultOllamaModel !== undefined) {
-    updates.push("default_ollama_model = ?");
-    values.push(settings.defaultOllamaModel);
-  }
-  if (settings.previewOpenaiModel !== undefined) {
-    updates.push("preview_openai_model = ?");
-    values.push(settings.previewOpenaiModel);
-  }
-  if (settings.previewAnthropicModel !== undefined) {
-    updates.push("preview_anthropic_model = ?");
-    values.push(settings.previewAnthropicModel);
-  }
-  if (settings.previewGeminiModel !== undefined) {
-    updates.push("preview_gemini_model = ?");
-    values.push(settings.previewGeminiModel);
-  }
-  if (settings.previewOllamaModel !== undefined) {
-    updates.push("preview_ollama_model = ?");
-    values.push(settings.previewOllamaModel);
-  }
-  if (settings.embeddingProviderOverride !== undefined) {
-    updates.push("embedding_provider_override = ?");
-    values.push(settings.embeddingProviderOverride ? 1 : 0);
-  }
-  if (settings.previewProviderOverride !== undefined) {
-    updates.push("preview_provider_override = ?");
-    values.push(settings.previewProviderOverride ? 1 : 0);
-  }
-  if (settings.failoverEnabled !== undefined) {
-    updates.push("failover_enabled = ?");
-    values.push(settings.failoverEnabled ? 1 : 0);
-  }
-  if (settings.failoverChain !== undefined) {
-    updates.push("failover_chain = ?");
-    values.push(JSON.stringify(settings.failoverChain));
-  }
+  if (settings.activeProvider !== undefined) updates.active_provider = settings.activeProvider;
+  if (settings.activeModel !== undefined) updates.active_model = settings.activeModel;
+  if (settings.openaiApiKey !== undefined) updates.openai_api_key = settings.openaiApiKey;
+  if (settings.anthropicApiKey !== undefined) updates.anthropic_api_key = settings.anthropicApiKey;
+  if (settings.geminiApiKey !== undefined) updates.gemini_api_key = settings.geminiApiKey;
+  if (settings.ollamaBaseUrl !== undefined) updates.ollama_base_url = settings.ollamaBaseUrl;
+  if (settings.embeddingProvider !== undefined) updates.embedding_provider = settings.embeddingProvider;
+  if (settings.embeddingModel !== undefined) updates.embedding_model = settings.embeddingModel;
+  if (settings.previewProvider !== undefined) updates.preview_provider = settings.previewProvider;
+  if (settings.previewModel !== undefined) updates.preview_model = settings.previewModel;
 
-  if (updates.length === 0) return;
+  await db.from('admin_settings').update(updates).eq('id', 1);
 
-  updates.push("updated_at = datetime('now')");
-  values.push(1);
+  // Invalidate cache
+  cachedSettings = null;
+  await initSettings();
+}
 
-  db.prepare(`UPDATE settings SET ${updates.join(", ")} WHERE id = ?`).run(
-    ...values
-  );
+export function invalidateSettingsCache() {
+  cachedSettings = null;
 }
