@@ -7,7 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { useTheme } from "@/components/ThemeProvider";
-import { ArrowLeft, Check, Eye, EyeOff, LogIn, LogOut, GripVertical, KeyRound, ChevronDown, Loader2, Brain, MessageSquare, Wifi, WifiOff } from "lucide-react";
+import { ArrowLeft, Check, Eye, EyeOff, LogIn, LogOut, GripVertical, KeyRound, ChevronDown, Loader2, Brain, MessageSquare, Wifi, WifiOff, Info, Copy } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
 import { useOllama } from "@/hooks/useOllama";
 import {
   DropdownMenu,
@@ -1366,9 +1372,43 @@ export default function SettingsPage() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">
-                    Ollama not detected. Make sure Ollama is running on your machine.
-                  </p>
+                  <div className="flex items-start gap-1.5">
+                    <p className="text-xs text-muted-foreground">
+                      Ollama not detected.
+                    </p>
+                    <TooltipProvider delayDuration={200}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button className="mt-px text-muted-foreground/60 hover:text-muted-foreground transition-colors">
+                          <Info className="h-3.5 w-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs space-y-2 p-3 text-left">
+                        <p className="text-xs font-medium">Make sure Ollama is running and allows this site.</p>
+                        <p className="text-xs text-muted-foreground">
+                          If Ollama is running but not detected, you may need to allow cross-origin requests. Restart Ollama with:
+                        </p>
+                        <div className="flex items-center gap-1">
+                          <code className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono select-all">
+                            OLLAMA_ORIGINS=* ollama serve
+                          </code>
+                          <button
+                            className="rounded p-0.5 hover:bg-muted transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard.writeText("OLLAMA_ORIGINS=* ollama serve");
+                            }}
+                          >
+                            <Copy className="h-3 w-3 text-muted-foreground" />
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground/70">
+                          On Windows: <code className="rounded bg-muted px-1 py-0.5 font-mono select-all">set OLLAMA_ORIGINS=*</code> then run <code className="rounded bg-muted px-1 py-0.5 font-mono">ollama serve</code>
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                    </TooltipProvider>
+                  </div>
                   <div className="flex gap-2">
                     <Button
                       size="sm"
