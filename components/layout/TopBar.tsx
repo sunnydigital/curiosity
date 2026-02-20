@@ -19,6 +19,7 @@ import type { LLMProviderName, Settings } from "@/types";
 
 export function TopBar() {
   const [settings, setSettings] = useState<any>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const { theme, toggleTheme } = useTheme();
   const pathname = usePathname();
 
@@ -33,6 +34,14 @@ export function TopBar() {
   useEffect(() => {
     fetchSettings();
   }, [pathname, fetchSettings]);
+
+  // Check auth status
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((data) => setIsAuthenticated(data.authenticated))
+      .catch(() => setIsAuthenticated(false));
+  }, [pathname]);
 
   // Listen for provider-switched events (from Settings page or other sources)
   useEffect(() => {
@@ -77,15 +86,17 @@ export function TopBar() {
     <TooltipProvider>
       <div className="flex h-12 items-center justify-between border-b border-border px-4">
         <div className="flex items-center gap-3">
-          {settings?.activeProvider && (
+          {isAuthenticated && settings?.activeProvider && (
             <ProviderSwitcher
               activeProvider={settings.activeProvider}
               onSwitch={handleProviderSwitch}
             />
           )}
-          <span className="text-xs text-muted-foreground">
-            {settings?.activeModel}
-          </span>
+          {isAuthenticated && (
+            <span className="text-xs text-muted-foreground">
+              {settings?.activeModel}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <Tooltip>

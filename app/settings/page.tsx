@@ -240,6 +240,29 @@ export default function SettingsPage() {
   const [draggedProvider, setDraggedProvider] = useState<LLMProviderName | null>(null);
   const [ollamaEmbeddingModels, setOllamaEmbeddingModels] = useState<string[]>([]);
   const [ollamaEmbeddingConnected, setOllamaEmbeddingConnected] = useState<boolean | null>(null);
+  const [authInfo, setAuthInfo] = useState<{ authenticated: boolean; isAdmin: boolean } | null>(null);
+  const [adminApiKey, setAdminApiKey] = useState("");
+  const [showAdminApiKey, setShowAdminApiKey] = useState(false);
+  const [adminApiKeySaved, setAdminApiKeySaved] = useState(false);
+
+  // Check auth status
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((data) => {
+        setAuthInfo({ authenticated: data.authenticated, isAdmin: data.isAdmin || false });
+        if (data.isAdmin) {
+          // Fetch admin API key
+          fetch("/api/settings")
+            .then((r) => r.json())
+            .then((s) => {
+              if (s.anthropicApiKey) setAdminApiKey(s.anthropicApiKey);
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(() => setAuthInfo({ authenticated: false, isAdmin: false }));
+  }, []);
 
   // Check for OAuth callback results in URL params
   useEffect(() => {
@@ -1541,6 +1564,61 @@ export default function SettingsPage() {
             )}
           </div>
         </section>
+
+        {authInfo?.isAdmin && (
+          <>
+            <Separator className="my-6" />
+
+            {/* Developer Section */}
+            <section className="mb-6">
+              <h2 className="mb-3 text-sm font-medium text-primary">Developer</h2>
+              <div className="rounded-md border border-primary/30 p-4 space-y-4">
+                <div>
+                  <div className="text-sm font-medium mb-1">Anthropic API Key</div>
+                  <div className="text-xs text-muted-foreground mb-2">
+                    This key is used for all users on the platform.
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Input
+                        type={showAdminApiKey ? "text" : "password"}
+                        value={adminApiKey}
+                        onChange={(e) => setAdminApiKey(e.target.value)}
+                        placeholder="sk-ant-..."
+                      />
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        onClick={() => setShowAdminApiKey(!showAdminApiKey)}
+                      >
+                        {showAdminApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          const res = await fetch("/api/settings", {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ anthropicApiKey: adminApiKey }),
+                          });
+                          if (!res.ok) throw new Error("Failed to save");
+                          setAdminApiKeySaved(true);
+                          setTimeout(() => setAdminApiKeySaved(false), 2000);
+                        } catch (e: any) {
+                          setError(e.message);
+                        }
+                      }}
+                    >
+                      {adminApiKeySaved ? <Check className="h-4 w-4" /> : "Save"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </>
+        )}
 
         <Separator className="my-6" />
 
