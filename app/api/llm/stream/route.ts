@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getSettingsAsync } from "@/db/queries/settings";
 import { getProviderAsync, getPreviewProviderAsync } from "@/lib/llm/provider-registry";
 import { FailoverExecutor } from "@/lib/llm/failover";
@@ -12,6 +12,7 @@ import { DEFAULT_SYSTEM_PROMPT } from "@/lib/constants";
 import type { LLMMessage, FailoverEvent } from "@/types";
 
 export async function POST(request: NextRequest) {
+  try {
   const body = await request.json();
   const { chatId, content, parentId, image } = body;
 
@@ -20,11 +21,15 @@ export async function POST(request: NextRequest) {
   let userHasOwnKey = false;
 
   // Check if logged-in user has their own API key for the active provider
-  const settings = await getSettingsAsync();
+  const baseSettings = await getSettingsAsync();
+  const settings = { ...baseSettings };
   if (auth.userId) {
     const userKey = await getUserApiKey(auth.userId, settings.activeProvider);
     if (userKey) {
       userHasOwnKey = true;
+      // Override the API key in settings with user's own key
+      const keyField = `${settings.activeProvider}ApiKey` as keyof typeof settings;
+      (settings as any)[keyField] = userKey;
     }
   }
 
@@ -67,15 +72,6 @@ export async function POST(request: NextRequest) {
   });
 
   await touchChat(chatId);
-
-  // If user has their own API key, override the settings for provider creation
-  if (userHasOwnKey && auth.userId) {
-    const userKey = await getUserApiKey(auth.userId, settings.activeProvider);
-    if (userKey) {
-      const keyField = `${settings.activeProvider}ApiKey` as keyof typeof settings;
-      (settings as any)[keyField] = userKey;
-    }
-  }
 
   const contextMessages = await getPathToRoot(userMessage.id);
 
@@ -307,4 +303,10 @@ export async function POST(request: NextRequest) {
       Connection: "keep-alive",
     },
   });
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: error.message || "An unexpected error occurred" },
+      { status: 500 }
+    );
+  }
 }

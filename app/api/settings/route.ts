@@ -34,8 +34,16 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // For non-admin users, don't expose that global keys exist
+    const maskedSettings = maskSecrets(settings);
+    if (!auth.isAdmin) {
+      maskedSettings.openaiApiKey = null;
+      maskedSettings.anthropicApiKey = null;
+      maskedSettings.geminiApiKey = null;
+    }
+
     return NextResponse.json({
-      ...maskSecrets(settings),
+      ...maskedSettings,
       isAdmin: auth.isAdmin,
       userApiKeys,
       oauthStatus: {
