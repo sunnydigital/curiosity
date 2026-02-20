@@ -246,6 +246,7 @@ export default function SettingsPage() {
   const [adminApiKey, setAdminApiKey] = useState("");
   const [showAdminApiKey, setShowAdminApiKey] = useState(false);
   const [adminApiKeySaved, setAdminApiKeySaved] = useState(false);
+  const [userApiKeys, setUserApiKeys] = useState<Record<string, string>>({});
 
   // Check auth status
   useEffect(() => {
@@ -285,6 +286,9 @@ export default function SettingsPage() {
       .then((data) => {
         if (data.oauthStatus) {
           setOauthStatus(data.oauthStatus);
+        }
+        if (data.userApiKeys) {
+          setUserApiKeys(data.userApiKeys);
         }
         setSettings(data);
       })
@@ -960,7 +964,7 @@ export default function SettingsPage() {
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">{p.label}</span>
                       <ConnectionBadge
-                        hasApiKey={!!(settings as any)[p.keyField]}
+                        hasApiKey={!!userApiKeys[p.name]}
                         hasOAuth={!!providerOAuth?.connected}
                         tier={providerOAuth?.tier || null}
                         authMode={authMode}
@@ -1028,9 +1032,9 @@ export default function SettingsPage() {
                               setApiKeys({ ...apiKeys, [p.keyField]: e.target.value })
                             }
                             placeholder={
-                              (settings as any)[p.keyField]
+                              userApiKeys[p.name]
                                 ? "Key saved — enter a new key to replace"
-                                : `Enter ${p.label} API key...`
+                                : `Enter your ${p.label} API key...`
                             }
                             className="pr-10"
                           />
@@ -1055,9 +1059,11 @@ export default function SettingsPage() {
                           className="h-9 text-xs"
                           disabled={!apiKeys[p.keyField]?.trim()}
                           onClick={async () => {
-                            const ok = await persistSettings({ [p.keyField]: apiKeys[p.keyField] });
+                            // Save as per-user API key (not admin global key)
+                            const ok = await persistSettings({ userApiKeys: { [p.name]: apiKeys[p.keyField] } });
                             if (ok) {
                               setApiKeys((prev) => ({ ...prev, [p.keyField]: "" }));
+                              setUserApiKeys((prev) => ({ ...prev, [p.name]: "••••••••" }));
                             }
                           }}
                         >

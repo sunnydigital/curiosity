@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSettingsAsync, updateSettings } from "@/db/queries/settings";
 import { getAuthContext } from "@/lib/auth/helpers";
+import { getUserApiKeys, setUserApiKey } from "@/db/queries/user-api-keys";
 import type { Settings } from "@/types";
 
 function maskSecrets(settings: Settings) {
@@ -22,9 +23,21 @@ export async function GET(request: NextRequest) {
   try {
     const settings = await getSettingsAsync();
     const auth = await getAuthContext(request);
+
+    // Fetch per-user API keys if authenticated
+    let userApiKeys: Record<string, string> = {};
+    if (auth.userId) {
+      const keys = await getUserApiKeys(auth.userId);
+      // Mask user keys for the response
+      for (const [provider, key] of Object.entries(keys)) {
+        userApiKeys[provider] = key ? "••••••••" : "";
+      }
+    }
+
     return NextResponse.json({
       ...maskSecrets(settings),
       isAdmin: auth.isAdmin,
+      userApiKeys,
       oauthStatus: {
         openai: { connected: false, tier: null, available: false },
         anthropic: { connected: false, tier: null, available: false },
@@ -42,16 +55,40 @@ export async function PUT(request: NextRequest) {
     const auth = await getAuthContext(request);
     const body = await request.json();
 
-    // Only admin can update API keys
-    if ((body.anthropicApiKey || body.openaiApiKey || body.geminiApiKey) && !auth.isAdmin) {
-      return NextResponse.json({ error: "Only admin can update API keys" }, { status: 403 });
+    // Handle per-user API keys
+    if (body.userApiKeys && auth.userId) {
+      for (const [provider, key] of Object.entries(body.userApiKeys)) {
+        if (typeof key === 'string' && key.trim()) {
+          await setUserApiKey(auth.userId, provider as any, key.trim());
+        }
+      }
+      delete body.userApiKeys;
     }
 
-    await updateSettings(body);
+    // Only admin can update global API keys in admin_settings
+    if ((body.anthropicApiKey || body.openaiApiKey || body.geminiApiKey) && !auth.isAdmin) {
+      return NextResponse.json({ error: "Only admin can update global API keys" }, { status: 403 });
+    }
+
+    if (Object.keys(body).length > 0) {
+      await updateSettings(body);
+    }
+
     const settings = await getSettingsAsync();
+
+    // Fetch updated user keys
+    let userApiKeys: Record<string, string> = {};
+    if (auth.userId) {
+      const keys = await getUserApiKeys(auth.userId);
+      for (const [provider, key] of Object.entries(keys)) {
+        userApiKeys[provider] = key ? "••••••••" : "";
+      }
+    }
+
     return NextResponse.json({
       ...maskSecrets(settings),
       isAdmin: auth.isAdmin,
+      userApiKeys,
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

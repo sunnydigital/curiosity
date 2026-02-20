@@ -7,6 +7,7 @@ import { touchChat, renameChat, getChat } from "@/db/queries/chats";
 import { getMemoryContext, onNewExchange } from "@/lib/memory/memory-manager";
 import { getAuthContext } from "@/lib/auth/helpers";
 import { checkRateLimit, incrementRateLimit } from "@/db/queries/rate-limits";
+import { getUserApiKey } from "@/db/queries/user-api-keys";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/constants";
 import type { LLMMessage, FailoverEvent } from "@/types";
 
@@ -14,8 +15,20 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { chatId, content, parentId, image } = body;
 
-  // Rate limit check for anonymous users
+  // Auth & rate limit check
   const auth = await getAuthContext(request);
+  let userHasOwnKey = false;
+
+  // Check if logged-in user has their own API key for the active provider
+  const settings = await getSettingsAsync();
+  if (auth.userId) {
+    const userKey = await getUserApiKey(auth.userId, settings.activeProvider);
+    if (userKey) {
+      userHasOwnKey = true;
+    }
+  }
+
+  // Rate limit only applies to anonymous users (not logged-in, not using own key)
   if (!auth.userId) {
     const ip = auth.anonIp || '127.0.0.1';
     const rateLimit = await checkRateLimit(ip);
@@ -55,7 +68,14 @@ export async function POST(request: NextRequest) {
 
   await touchChat(chatId);
 
-  const settings = await getSettingsAsync();
+  // If user has their own API key, override the settings for provider creation
+  if (userHasOwnKey && auth.userId) {
+    const userKey = await getUserApiKey(auth.userId, settings.activeProvider);
+    if (userKey) {
+      const keyField = `${settings.activeProvider}ApiKey` as keyof typeof settings;
+      (settings as any)[keyField] = userKey;
+    }
+  }
 
   const contextMessages = await getPathToRoot(userMessage.id);
 

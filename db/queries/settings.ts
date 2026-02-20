@@ -120,6 +120,8 @@ function rowToSettings(row: any): Settings {
 }
 
 export async function getSettingsAsync(): Promise<Settings> {
+  // Always fetch fresh from Supabase to avoid stale cache in server-side API routes
+  cachedSettings = null;
   return initSettings();
 }
 

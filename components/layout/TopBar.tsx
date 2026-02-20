@@ -139,16 +139,18 @@ export function TopBar() {
             <TooltipContent>Memory Panel</TooltipContent>
           </Tooltip>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Link href="/settings">
-                <Button variant="ghost" size="icon">
-                  <SettingsIcon className="h-4 w-4" />
-                </Button>
-              </Link>
-            </TooltipTrigger>
-            <TooltipContent>Settings</TooltipContent>
-          </Tooltip>
+          {isAuthenticated && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link href="/settings">
+                  <Button variant="ghost" size="icon">
+                    <SettingsIcon className="h-4 w-4" />
+                  </Button>
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent>Settings</TooltipContent>
+            </Tooltip>
+          )}
 
           <UserMenu />
         </div>
