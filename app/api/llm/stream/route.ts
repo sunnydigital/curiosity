@@ -23,6 +23,24 @@ export async function POST(request: NextRequest) {
   // Check if logged-in user has their own API key for the active provider
   const baseSettings = await getSettingsAsync();
   const settings = { ...baseSettings };
+
+  // Anonymous users can't use Ollama (local-only) — fall back to a cloud provider
+  // using the admin's global API key.
+  if (!auth.userId && settings.activeProvider === "ollama") {
+    const cloudFallbacks: { provider: LLMProviderName; keyField: string; model: string }[] = [
+      { provider: "anthropic", keyField: "anthropicApiKey", model: settings.defaultAnthropicModel || "claude-haiku-4-5-20251001" },
+      { provider: "openai", keyField: "openaiApiKey", model: settings.defaultOpenaiModel || "gpt-4o-mini" },
+      { provider: "gemini", keyField: "geminiApiKey", model: settings.defaultGeminiModel || "gemini-2.0-flash" },
+    ];
+    for (const fb of cloudFallbacks) {
+      if ((settings as any)[fb.keyField]) {
+        settings.activeProvider = fb.provider;
+        settings.activeModel = fb.model;
+        break;
+      }
+    }
+  }
+
   if (auth.userId) {
     const userKey = await getUserApiKey(auth.userId, settings.activeProvider);
     if (userKey) {
