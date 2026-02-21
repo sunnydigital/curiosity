@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSettingsAsync, updateSettings } from "@/db/queries/settings";
 import { getAuthContext } from "@/lib/auth/helpers";
 import { getUserApiKeys, setUserApiKey } from "@/db/queries/user-api-keys";
+import { getAllOAuthStatusAsync } from "@/db/queries/oauth-tokens";
 import type { Settings } from "@/types";
 
 function maskSecrets(settings: Settings) {
@@ -46,12 +47,7 @@ export async function GET(request: NextRequest) {
       ...maskedSettings,
       isAdmin: auth.isAdmin,
       userApiKeys,
-      oauthStatus: {
-        openai: { connected: false, tier: null, available: false },
-        anthropic: { connected: false, tier: null, available: false },
-        gemini: { connected: false, tier: null, available: false },
-        ollama: { connected: false, tier: null, available: false },
-      },
+      oauthStatus: await getAllOAuthStatusAsync(),
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
