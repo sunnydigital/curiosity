@@ -145,16 +145,71 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
     setReembedding(key);
     setError(null);
     try {
-      const res = await fetch("/api/memory/reembed", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ oldModel }),
-      });
-      const data = await res.json();
-      if (data.error) {
-        setError(data.error);
+      // Fetch settings to check if we should use client-side Ollama
+      const settingsRes = await fetch("/api/settings");
+      const settings = await settingsRes.json();
+      const useClientOllama =
+        settings.embeddingMode === "local" &&
+        settings.localEmbeddingBackend === "ollama";
+
+      if (useClientOllama) {
+        // Client-side re-embedding via local Ollama
+        const targetModel = settings.localEmbeddingModel || "nomic-embed-text";
+        const ollamaUrl = settings.ollamaBaseUrl || "http://localhost:11434";
+
+        // Get memories that need re-embedding
+        const memoriesToReembed = memories.filter((m) =>
+          oldModel === null ? !m.embeddingModel : m.embeddingModel === oldModel
+        );
+
+        if (memoriesToReembed.length === 0) {
+          fetchMemories();
+          return;
+        }
+
+        let done = 0;
+        for (const memory of memoriesToReembed) {
+          try {
+            // Call Ollama embedding API directly from browser
+            const embedRes = await fetch(`${ollamaUrl}/api/embed`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ model: targetModel, input: memory.content }),
+            });
+            if (!embedRes.ok) throw new Error(`Ollama error: ${embedRes.status}`);
+            const embedData = await embedRes.json();
+            const embedding = embedData.embeddings?.[0];
+            if (!embedding) throw new Error("No embedding returned");
+
+            // Save to server
+            await fetch("/api/memory/reembed-update", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: memory.id, embedding, model: targetModel }),
+            });
+            done++;
+          } catch (e: any) {
+            console.error(`Failed to re-embed memory ${memory.id}:`, e);
+          }
+        }
+
+        if (done > 0) fetchMemories();
+        if (done < memoriesToReembed.length) {
+          setError(`Re-embedded ${done}/${memoriesToReembed.length} memories. Some failed — is Ollama running with ${targetModel}?`);
+        }
       } else {
-        fetchMemories();
+        // Server-side re-embedding for cloud providers
+        const res = await fetch("/api/memory/reembed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ oldModel }),
+        });
+        const data = await res.json();
+        if (data.error) {
+          setError(data.error);
+        } else {
+          fetchMemories();
+        }
       }
     } catch (e: any) {
       setError(e.message || "Failed to re-embed memories");
