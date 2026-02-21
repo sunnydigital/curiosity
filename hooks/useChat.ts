@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { Message, FailoverEvent, LLMProviderName } from "@/types";
-import { streamOllamaChat } from "@/lib/llm/ollama-client";
+import { streamOllamaChat, generateOllamaEmbedding } from "@/lib/llm/ollama-client";
 
 interface UseChatOptions {
   chatId: string;
@@ -160,6 +160,28 @@ export function useChat({ chatId }: UseChatOptions) {
             chain.unshift(cur);
             cur = cur.parentId ? allMessages.find((m: any) => m.id === cur.parentId) : null;
           }
+
+          // Retrieve memory context using client-side embedding
+          try {
+            const settingsRes = await fetch("/api/settings");
+            const s = await settingsRes.json();
+            if (s.memoryEnabled) {
+              const embModel = s.localEmbeddingModel || "nomic-embed-text";
+              const emb = await generateOllamaEmbedding({ baseUrl: ollamaOptions.baseUrl, model: embModel, text: content });
+              const memRes = await fetch(`/api/memory?q=${encodeURIComponent(content)}&embedding=${encodeURIComponent(JSON.stringify(emb))}&embeddingModel=${encodeURIComponent(embModel)}`);
+              if (memRes.ok) {
+                const memories = await memRes.json();
+                if (Array.isArray(memories) && memories.length > 0) {
+                  const memLines = memories.map((m: any) => `- ${m.content} (confidence: ${m.score.toFixed(2)}, source: ${m.source})`);
+                  const memContext = `Relevant knowledge from previous conversations:\n${memLines.join("\n")}`;
+                  pathMessages.push({ role: "system", content: memContext });
+                }
+              }
+            }
+          } catch (err) {
+            console.warn("[useChat] Client-side memory retrieval failed:", err);
+          }
+
           for (const m of chain) {
             pathMessages.push({ role: m.role, content: m.content });
           }
@@ -231,6 +253,26 @@ export function useChat({ chatId }: UseChatOptions) {
           return;
         }
 
+        // Generate query embedding client-side if using local Ollama embeddings
+        let queryEmbedding: { embedding: number[]; model: string } | undefined;
+        try {
+          const settingsRes = await fetch("/api/settings");
+          const s = await settingsRes.json();
+          const isLocalOllama = s.embeddingMode === "local" && s.localEmbeddingBackend === "ollama";
+          const isOnlineOllama = s.embeddingMode !== "local" && (
+            (s.embeddingProviderOverride && s.embeddingProvider === "ollama") ||
+            (!s.embeddingProviderOverride && s.activeProvider === "ollama")
+          );
+          if (isLocalOllama || isOnlineOllama) {
+            const ollamaUrl = s.ollamaBaseUrl || "http://localhost:11434";
+            const embModel = s.localEmbeddingModel || "nomic-embed-text";
+            const emb = await generateOllamaEmbedding({ baseUrl: ollamaUrl, model: embModel, text: content });
+            queryEmbedding = { embedding: emb, model: embModel };
+          }
+        } catch (err) {
+          console.warn("[useChat] Client-side query embedding failed:", err);
+        }
+
         const response = await fetch("/api/llm/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -239,6 +281,7 @@ export function useChat({ chatId }: UseChatOptions) {
             content,
             parentId: parentId || getLastMessageId(),
             image: imageData,
+            queryEmbedding,
           }),
           signal: abortRef.current.signal,
         });

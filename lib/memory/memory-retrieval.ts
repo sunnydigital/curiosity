@@ -12,13 +12,16 @@ export interface RetrievedMemory {
 
 export async function retrieveRelevantMemories(
   queryText: string,
-  topK: number = MEMORY_TOP_K
+  topK: number = MEMORY_TOP_K,
+  preComputedEmbedding?: { embedding: number[]; model: string }
 ): Promise<RetrievedMemory[]> {
   const settings = await getSettingsAsync();
   if (!settings.memoryEnabled) return [];
 
   try {
-    const { embedding: queryEmbedding, model: queryModel } = await generateEmbedding(queryText);
+    const { embedding: queryEmbedding, model: queryModel } = preComputedEmbedding
+      ? preComputedEmbedding
+      : await generateEmbedding(queryText);
 
     const memories = await searchMemories(queryEmbedding, {
       lambda: settings.decayLambda,

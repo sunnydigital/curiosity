@@ -14,7 +14,7 @@ import type { LLMMessage, FailoverEvent, LLMProviderName } from "@/types";
 export async function POST(request: NextRequest) {
   try {
   const body = await request.json();
-  const { chatId, content, parentId, image } = body;
+  const { chatId, content, parentId, image, queryEmbedding } = body;
 
   // Auth & rate limit check
   const auth = await getAuthContext(request);
@@ -98,7 +98,10 @@ export async function POST(request: NextRequest) {
   ];
 
   try {
-    const memoryContext = await getMemoryContext(content);
+    const preComputedEmb = queryEmbedding?.embedding && queryEmbedding?.model
+      ? { embedding: queryEmbedding.embedding as number[], model: queryEmbedding.model as string }
+      : undefined;
+    const memoryContext = await getMemoryContext(content, preComputedEmb);
     if (memoryContext) {
       llmMessages.push({ role: "system", content: memoryContext });
     }

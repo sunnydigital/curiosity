@@ -45,13 +45,14 @@ export async function onNewExchange(
 }
 
 export async function getMemoryContext(
-  currentMessage: string
+  currentMessage: string,
+  preComputedEmbedding?: { embedding: number[]; model: string }
 ): Promise<string | null> {
   const settings = await getSettingsAsync();
   if (!settings.memoryEnabled) return null;
 
   try {
-    const memories = await retrieveRelevantMemories(currentMessage);
+    const memories = await retrieveRelevantMemories(currentMessage, undefined, preComputedEmbedding);
     return formatMemoriesForContext(memories);
   } catch {
     return null;

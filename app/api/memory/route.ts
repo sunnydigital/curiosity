@@ -10,7 +10,12 @@ export async function GET(request: NextRequest) {
 
   if (query) {
     try {
-      const memories = await retrieveRelevantMemories(query);
+      const embeddingParam = request.nextUrl.searchParams.get("embedding");
+      const modelParam = request.nextUrl.searchParams.get("embeddingModel");
+      const preComputed = embeddingParam && modelParam
+        ? { embedding: JSON.parse(embeddingParam) as number[], model: modelParam }
+        : undefined;
+      const memories = await retrieveRelevantMemories(query, undefined, preComputed);
       return NextResponse.json(memories);
     } catch (error: any) {
       return NextResponse.json({ error: error.message }, { status: 500 });
