@@ -193,6 +193,24 @@ export function useChat({ chatId }: UseChatOptions) {
           setStreamingContent("");
           streamingContentRef.current = "";
 
+          // Auto-generate title for new chats via server (uses cloud provider fallback)
+          try {
+            const titleRes = await fetch(`/api/chat/${chatId}/generate-title`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                userContent: content,
+                assistantContent: fullContent.slice(0, 500),
+              }),
+            });
+            if (titleRes.ok) {
+              const titleData = await titleRes.json();
+              if (titleData.titleUpdated) {
+                window.dispatchEvent(new CustomEvent("refresh-sidebar"));
+              }
+            }
+          } catch {}
+
           return;
         }
 
