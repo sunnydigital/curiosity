@@ -6,9 +6,17 @@ const OLLAMA_BASE_URL = "http://localhost:11434";
 const CHECK_INTERVAL = 30000;
 const PERMISSION_KEY = "ollama-detection-allowed";
 
+const EMBEDDING_KEYWORDS = ["embed", "minilm", "bge-", "snowflake-arctic-embed", "e5-", "gte-", "granite-embedding", "paraphrase-multilingual"];
+
+function isEmbeddingModel(name: string): boolean {
+  const lower = name.toLowerCase();
+  return EMBEDDING_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
 interface UseOllamaResult {
   isAvailable: boolean;
   models: string[];
+  embeddingModels: string[];
   baseUrl: string;
   isLoading: boolean;
   permitted: boolean;
@@ -85,5 +93,7 @@ export function useOllama(): UseOllamaResult {
     setModels([]);
   }, []);
 
-  return { isAvailable, models, baseUrl: OLLAMA_BASE_URL, isLoading, permitted, allow, revoke, recheck: check };
+  const embeddingModels = models.filter(isEmbeddingModel);
+
+  return { isAvailable, models, embeddingModels, baseUrl: OLLAMA_BASE_URL, isLoading, permitted, allow, revoke, recheck: check };
 }

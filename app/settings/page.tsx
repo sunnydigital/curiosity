@@ -350,8 +350,9 @@ export default function SettingsPage() {
   const [defaultModelFocus, setDefaultModelFocus] = useState<Record<string, boolean>>({});
   const [previewModelFocus, setPreviewModelFocus] = useState<Record<string, boolean>>({});
   const [draggedProvider, setDraggedProvider] = useState<LLMProviderName | null>(null);
-  const [ollamaEmbeddingModels, setOllamaEmbeddingModels] = useState<string[]>([]);
-  const [ollamaEmbeddingConnected, setOllamaEmbeddingConnected] = useState<boolean | null>(null);
+  // Ollama embedding state derived from client-side hook
+  const ollamaEmbeddingModels = ollama.embeddingModels;
+  const ollamaEmbeddingConnected = ollama.permitted ? ollama.isAvailable : null;
   const [authInfo, setAuthInfo] = useState<{ authenticated: boolean; isAdmin: boolean } | null>(null);
   const [adminApiKey, setAdminApiKey] = useState("");
   const [showAdminApiKey, setShowAdminApiKey] = useState(false);
@@ -514,19 +515,7 @@ export default function SettingsPage() {
 
   // Ollama detection is now handled by the useOllama hook (client-side, permission-based)
 
-  // Fetch Ollama embedding models on mount
-  useEffect(() => {
-    fetch("/api/ollama-models/embedding")
-      .then((r) => r.json())
-      .then((data) => {
-        setOllamaEmbeddingModels(data.models || []);
-        setOllamaEmbeddingConnected(data.connected ?? false);
-      })
-      .catch(() => {
-        setOllamaEmbeddingModels([]);
-        setOllamaEmbeddingConnected(false);
-      });
-  }, []);
+  // Ollama embedding models are now derived from the client-side useOllama hook
 
   // Fetch models dynamically for all cloud providers once settings are loaded
   const modelsFetchedRef = useRef(false);
@@ -1582,46 +1571,55 @@ export default function SettingsPage() {
                       <OllamaStatusBadge connected={ollamaEmbeddingConnected} />
                     </div>
 
-                    {/* Embedding Model selector */}
-                    <div>
-                      <label className="mb-1 block text-xs text-muted-foreground">
-                        Embedding Model
-                      </label>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm">
-                            <span>
-                              {(() => {
-                                const staticModel = LOCAL_EMBEDDING_MODELS.ollama.find(m => m.id === settings.localEmbeddingModel);
-                                return staticModel ? staticModel.name : settings.localEmbeddingModel;
-                              })()}
-                            </span>
-                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)]">
-                          {LOCAL_EMBEDDING_MODELS.ollama.map((model) => (
-                            <DropdownMenuItem
-                              key={model.id}
-                              onSelect={() => {
-                                setSettings({ ...settings, localEmbeddingBackend: "ollama", localEmbeddingModel: model.id });
-                                persistSettings({ localEmbeddingBackend: "ollama", localEmbeddingModel: model.id });
-                              }}
-                            >
-                              <div className="flex flex-col">
-                                <span>{model.name}</span>
-                                <span className="text-[10px] text-muted-foreground">{model.dimensions} dimensions</span>
-                              </div>
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      {ollamaEmbeddingConnected === false && (
-                        <div className="mt-1.5 text-[10px] text-muted-foreground">
-                          Run <code className="rounded bg-muted px-1">ollama serve</code> and <code className="rounded bg-muted px-1">ollama pull {settings.localEmbeddingModel}</code>
-                        </div>
-                      )}
-                    </div>
+                    {!ollama.permitted ? (
+                      <div className="space-y-2">
+                        <p className="text-xs text-muted-foreground">
+                          Allow Ollama detection to see available embedding models.
+                        </p>
+                        <Button size="sm" variant="outline" onClick={() => ollama.allow()} className="gap-1.5 text-xs">
+                          <Wifi className="h-3.5 w-3.5" />
+                          Detect Local Ollama
+                        </Button>
+                      </div>
+                    ) : !ollama.isAvailable ? (
+                      <OllamaSetupGuide onRetry={() => ollama.recheck()} onDisconnect={() => ollama.revoke()} />
+                    ) : ollamaEmbeddingModels.length === 0 ? (
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">
+                          Ollama is connected but no embedding models found.
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          Pull an embedding model: <code className="rounded bg-muted px-1">ollama pull nomic-embed-text</code>
+                        </p>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="mb-1 block text-xs text-muted-foreground">
+                          Embedding Model
+                        </label>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm">
+                              <span>{settings.localEmbeddingModel || ollamaEmbeddingModels[0]}</span>
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-[var(--radix-dropdown-menu-trigger-width)]">
+                            {ollamaEmbeddingModels.map((modelName) => (
+                              <DropdownMenuItem
+                                key={modelName}
+                                onSelect={() => {
+                                  setSettings({ ...settings, localEmbeddingBackend: "ollama", localEmbeddingModel: modelName });
+                                  persistSettings({ localEmbeddingBackend: "ollama", localEmbeddingModel: modelName });
+                                }}
+                              >
+                                <span>{modelName}</span>
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    )}
                   </div>
                 )}
 
