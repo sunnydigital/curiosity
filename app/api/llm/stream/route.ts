@@ -4,7 +4,7 @@ import { getProviderAsync, getPreviewProviderAsync } from "@/lib/llm/provider-re
 import { FailoverExecutor } from "@/lib/llm/failover";
 import { createMessage, getPathToRoot } from "@/db/queries/messages";
 import { touchChat, renameChat, getChat } from "@/db/queries/chats";
-import { getMemoryContext, onNewExchange } from "@/lib/memory/memory-manager";
+import { getMemoryContext } from "@/lib/memory/memory-manager";
 import { getAuthContext } from "@/lib/auth/helpers";
 import { checkRateLimit, incrementRateLimit } from "@/db/queries/rate-limits";
 import { getUserApiKey } from "@/db/queries/user-api-keys";
@@ -268,12 +268,6 @@ export async function POST(request: NextRequest) {
               )
             );
           }
-        }
-
-        try {
-          await onNewExchange(chatId, userMessage.id, content, fullContent);
-        } catch (err) {
-          console.error("[Stream] Memory extraction failed:", err);
         }
 
         controller.close();

@@ -276,6 +276,19 @@ export function useChat({ chatId }: UseChatOptions) {
                 if (event.actualProvider && event.actualModel) {
                   handleFailbackModelChange(event.actualProvider, event.actualModel);
                 }
+                // Client-triggered memory extraction for cloud providers
+                try {
+                  fetch("/api/memories/extract", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      userContent: content,
+                      assistantContent: event.message.content,
+                      chatId,
+                      messageId: lastUserMessageIdRef.current,
+                    }),
+                  }).catch(() => {});
+                } catch {}
               } else if (event.type === "title_updated") {
                 window.dispatchEvent(new CustomEvent("refresh-sidebar"));
               } else if (event.type === "failover") {
@@ -453,6 +466,19 @@ export function useChat({ chatId }: UseChatOptions) {
                 if (event.actualProvider && event.actualModel) {
                   handleFailbackModelChange(event.actualProvider, event.actualModel);
                 }
+                // Client-triggered memory extraction for branch
+                try {
+                  fetch("/api/memories/extract", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      userContent: branchRequest.selectedText || "",
+                      assistantContent: event.message.content,
+                      chatId: branchRequest.chatId,
+                      messageId: branchRootId,
+                    }),
+                  }).catch(() => {});
+                } catch {}
               } else if (event.type === "failover") {
                 setFailoverNotice(event as FailoverEvent);
                 setTimeout(() => setFailoverNotice(null), 8000);
