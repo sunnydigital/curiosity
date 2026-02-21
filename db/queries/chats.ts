@@ -31,6 +31,21 @@ export async function createChat(title?: string, userId?: string | null, anonIp?
   return rowToChat(data);
 }
 
+export async function getChatIfOwned(chatId: string, userId: string | null, anonIp: string | null): Promise<Chat | null> {
+  const db = getDb();
+  let q = db.from('chats').select('*').eq('id', chatId);
+  if (userId) {
+    q = q.eq('user_id', userId);
+  } else if (anonIp) {
+    q = q.eq('anon_ip', anonIp).is('user_id', null);
+  } else {
+    return null;
+  }
+  const { data, error } = await q.single();
+  if (error || !data) return null;
+  return rowToChat(data);
+}
+
 export async function getChat(id: string): Promise<Chat | null> {
   const db = getDb();
   const { data, error } = await db

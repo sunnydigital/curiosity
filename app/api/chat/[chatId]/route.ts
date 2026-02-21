@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getChat, renameChat, deleteChat, starChat } from "@/db/queries/chats";
+import { getChat, renameChat, deleteChat, starChat, getChatIfOwned } from "@/db/queries/chats";
 import { assignChatToProject } from "@/db/queries/projects";
+import { getAuthContext } from "@/lib/auth/helpers";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ chatId: string }> }
 ) {
   const { chatId } = await params;
-  const chat = await getChat(chatId);
+  const auth = await getAuthContext(request);
+  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonIp);
   if (!chat) {
     return NextResponse.json({ error: "Chat not found" }, { status: 404 });
   }
@@ -19,6 +21,11 @@ export async function PATCH(
   { params }: { params: Promise<{ chatId: string }> }
 ) {
   const { chatId } = await params;
+  const auth = await getAuthContext(request);
+  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonIp);
+  if (!chat) {
+    return NextResponse.json({ error: "Chat not found" }, { status: 404 });
+  }
   const body = await request.json();
   if (body.title !== undefined) {
     await renameChat(chatId, body.title);
@@ -29,15 +36,20 @@ export async function PATCH(
   if (body.projectId !== undefined) {
     await assignChatToProject(chatId, body.projectId);
   }
-  const chat = await getChat(chatId);
-  return NextResponse.json(chat);
+  const updated = await getChat(chatId);
+  return NextResponse.json(updated);
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ chatId: string }> }
 ) {
   const { chatId } = await params;
+  const auth = await getAuthContext(request);
+  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonIp);
+  if (!chat) {
+    return NextResponse.json({ error: "Chat not found" }, { status: 404 });
+  }
   await deleteChat(chatId);
   return NextResponse.json({ success: true });
 }

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getChat, renameChat } from "@/db/queries/chats";
+import { getChat, renameChat, getChatIfOwned } from "@/db/queries/chats";
 import { getSettingsAsync } from "@/db/queries/settings";
 import { getProviderAsync } from "@/lib/llm/provider-registry";
+import { getAuthContext } from "@/lib/auth/helpers";
 import type { LLMProviderName } from "@/types";
 
 export async function POST(
@@ -9,6 +10,11 @@ export async function POST(
   { params }: { params: Promise<{ chatId: string }> }
 ) {
   const { chatId } = await params;
+  const auth = await getAuthContext(request);
+  const ownedChat = await getChatIfOwned(chatId, auth.userId, auth.anonIp);
+  if (!ownedChat) {
+    return NextResponse.json({ error: "Chat not found" }, { status: 404 });
+  }
   const { userContent, assistantContent } = await request.json();
 
   const chat = await getChat(chatId);

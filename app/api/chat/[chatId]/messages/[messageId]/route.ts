@@ -1,11 +1,18 @@
 import { NextRequest } from "next/server";
 import { getMessage, deleteMessage } from "@/db/queries/messages";
+import { getChatIfOwned } from "@/db/queries/chats";
+import { getAuthContext } from "@/lib/auth/helpers";
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ chatId: string; messageId: string }> }
 ) {
   const { chatId, messageId } = await params;
+  const auth = await getAuthContext(request);
+  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonIp);
+  if (!chat) {
+    return Response.json({ error: "Chat not found" }, { status: 404 });
+  }
 
   const message = await getMessage(messageId);
   if (!message) {

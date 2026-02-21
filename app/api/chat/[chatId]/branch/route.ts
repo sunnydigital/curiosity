@@ -1,10 +1,11 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createMessage, getPathToRoot } from "@/db/queries/messages";
-import { touchChat } from "@/db/queries/chats";
+import { touchChat, getChatIfOwned } from "@/db/queries/chats";
 import { getSettingsAsync } from "@/db/queries/settings";
 import { getProviderAsync } from "@/lib/llm/provider-registry";
 import { FailoverExecutor } from "@/lib/llm/failover";
 import { BRANCH_PROMPTS, DEFAULT_SYSTEM_PROMPT } from "@/lib/constants";
+import { getAuthContext } from "@/lib/auth/helpers";
 import type { LLMMessage, LLMProviderName, BranchCreationRequest, FailoverEvent } from "@/types";
 
 export async function POST(
@@ -12,6 +13,11 @@ export async function POST(
   { params }: { params: Promise<{ chatId: string }> }
 ) {
   const { chatId } = await params;
+  const auth = await getAuthContext(request);
+  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonIp);
+  if (!chat) {
+    return NextResponse.json({ error: "Chat not found" }, { status: 404 });
+  }
   const body: BranchCreationRequest = await request.json();
 
   const promptPrefix =

@@ -1,16 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMessagesByChat, createMessage, getPathToRoot } from "@/db/queries/messages";
-import { touchChat, renameChat, getChat } from "@/db/queries/chats";
+import { touchChat, renameChat, getChat, getChatIfOwned } from "@/db/queries/chats";
 import { getSettingsAsync } from "@/db/queries/settings";
 import { getProviderAsync } from "@/lib/llm/provider-registry";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/constants";
+import { getAuthContext } from "@/lib/auth/helpers";
 import type { LLMMessage } from "@/types";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ chatId: string }> }
 ) {
   const { chatId } = await params;
+  const auth = await getAuthContext(request);
+  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonIp);
+  if (!chat) {
+    return NextResponse.json({ error: "Chat not found" }, { status: 404 });
+  }
   const messages = await getMessagesByChat(chatId);
   return NextResponse.json(messages);
 }
@@ -20,6 +26,11 @@ export async function POST(
   { params }: { params: Promise<{ chatId: string }> }
 ) {
   const { chatId } = await params;
+  const auth = await getAuthContext(request);
+  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonIp);
+  if (!chat) {
+    return NextResponse.json({ error: "Chat not found" }, { status: 404 });
+  }
   const body = await request.json();
   const { content, parentId, saveOnly } = body;
 
@@ -74,8 +85,8 @@ export async function POST(
     model: settings.activeModel,
   });
 
-  const chat = await getChat(chatId);
-  if (chat && chat.title === "New Chat") {
+  const currentChat = await getChat(chatId);
+  if (currentChat && currentChat.title === "New Chat") {
     try {
       const titleResponse = await provider.complete({
         model: settings.activeModel,

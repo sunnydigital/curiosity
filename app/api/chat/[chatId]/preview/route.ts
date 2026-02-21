@@ -3,12 +3,19 @@ import { getMessage, getChildren, updatePreviewSummary } from "@/db/queries/mess
 import { getSettingsAsync } from "@/db/queries/settings";
 import { getProviderAsync } from "@/lib/llm/provider-registry";
 import { PREVIEW_PROMPT } from "@/lib/constants";
+import { getChatIfOwned } from "@/db/queries/chats";
+import { getAuthContext } from "@/lib/auth/helpers";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ chatId: string }> }
 ) {
-  await params;
+  const { chatId } = await params;
+  const auth = await getAuthContext(request);
+  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonIp);
+  if (!chat) {
+    return NextResponse.json({ error: "Chat not found" }, { status: 404 });
+  }
   const body = await request.json();
   const { messageId } = body;
 
