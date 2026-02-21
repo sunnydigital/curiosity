@@ -96,26 +96,26 @@ function rowToSettings(row: any): Settings {
     previewProvider: (row.preview_provider || 'anthropic') as LLMProviderName,
     previewModel: row.preview_model || 'claude-haiku-4-5-20251001',
     previewProviderOverride: false,
-    summarySentences: 2,
-    openaiAuthMode: 'api_key' as any,
-    anthropicAuthMode: 'api_key' as any,
-    geminiAuthMode: 'api_key' as any,
+    summarySentences: row.summary_sentences ?? 2,
+    openaiAuthMode: (row.openai_auth_mode || 'api_key') as any,
+    anthropicAuthMode: (row.anthropic_auth_mode || 'api_key') as any,
+    geminiAuthMode: (row.gemini_auth_mode || 'api_key') as any,
     openaiOauthClientId: null,
     openaiOauthClientSecret: null,
     anthropicOauthClientId: null,
     anthropicOauthClientSecret: null,
     geminiOauthClientId: null,
     geminiOauthClientSecret: null,
-    defaultOpenaiModel: 'gpt-5.2-pro',
-    defaultAnthropicModel: 'claude-opus-4-6',
-    defaultGeminiModel: 'gemini-3-pro-preview',
-    defaultOllamaModel: 'qwen3-vl:30b',
-    previewOpenaiModel: 'gpt-5-mini',
-    previewAnthropicModel: 'claude-haiku-4-5-20251001',
-    previewGeminiModel: 'gemini-3-flash-preview',
-    previewOllamaModel: 'qwen3-vl:30b',
-    failoverEnabled: false,
-    failoverChain: [],
+    defaultOpenaiModel: row.default_openai_model || 'gpt-5.2-pro',
+    defaultAnthropicModel: row.default_anthropic_model || 'claude-opus-4-6',
+    defaultGeminiModel: row.default_gemini_model || 'gemini-3-pro-preview',
+    defaultOllamaModel: row.default_ollama_model || 'qwen3-vl:30b',
+    previewOpenaiModel: row.preview_openai_model || 'gpt-5-mini',
+    previewAnthropicModel: row.preview_anthropic_model || 'claude-haiku-4-5-20251001',
+    previewGeminiModel: row.preview_gemini_model || 'gemini-3-flash-preview',
+    previewOllamaModel: row.preview_ollama_model || 'qwen3-vl:30b',
+    failoverEnabled: row.failover_enabled ?? false,
+    failoverChain: row.failover_chain || [],
   };
 }
 
@@ -142,6 +142,20 @@ export async function updateSettings(settings: Partial<Settings>): Promise<void>
   if (settings.embeddingMode !== undefined) updates.embedding_mode = settings.embeddingMode;
   if (settings.localEmbeddingBackend !== undefined) updates.local_embedding_backend = settings.localEmbeddingBackend;
   if (settings.localEmbeddingModel !== undefined) updates.local_embedding_model = settings.localEmbeddingModel;
+  if (settings.summarySentences !== undefined) updates.summary_sentences = settings.summarySentences;
+  if (settings.openaiAuthMode !== undefined) updates.openai_auth_mode = settings.openaiAuthMode;
+  if (settings.anthropicAuthMode !== undefined) updates.anthropic_auth_mode = settings.anthropicAuthMode;
+  if (settings.geminiAuthMode !== undefined) updates.gemini_auth_mode = settings.geminiAuthMode;
+  if (settings.defaultOpenaiModel !== undefined) updates.default_openai_model = settings.defaultOpenaiModel;
+  if (settings.defaultAnthropicModel !== undefined) updates.default_anthropic_model = settings.defaultAnthropicModel;
+  if (settings.defaultGeminiModel !== undefined) updates.default_gemini_model = settings.defaultGeminiModel;
+  if (settings.defaultOllamaModel !== undefined) updates.default_ollama_model = settings.defaultOllamaModel;
+  if (settings.previewOpenaiModel !== undefined) updates.preview_openai_model = settings.previewOpenaiModel;
+  if (settings.previewAnthropicModel !== undefined) updates.preview_anthropic_model = settings.previewAnthropicModel;
+  if (settings.previewGeminiModel !== undefined) updates.preview_gemini_model = settings.previewGeminiModel;
+  if (settings.previewOllamaModel !== undefined) updates.preview_ollama_model = settings.previewOllamaModel;
+  if (settings.failoverEnabled !== undefined) updates.failover_enabled = settings.failoverEnabled;
+  if (settings.failoverChain !== undefined) updates.failover_chain = settings.failoverChain;
 
   await db.from('admin_settings').update(updates).eq('id', 1);
 
