@@ -152,6 +152,110 @@ function ProviderIcon({ provider, active }: { provider: LLMProviderName; active?
   );
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className="rounded p-1 hover:bg-muted/80 transition-colors"
+      onClick={(e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }}
+    >
+      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3 text-muted-foreground" />}
+    </button>
+  );
+}
+
+function OllamaSetupGuide({ onRetry, onDisconnect }: { onRetry: () => void; onDisconnect: () => void }) {
+  const [showGuide, setShowGuide] = useState(false);
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">
+        Ollama not detected.{" "}
+        <button
+          onClick={() => setShowGuide(!showGuide)}
+          className="text-xs underline underline-offset-2 hover:text-foreground transition-colors"
+        >
+          {showGuide ? "Hide setup guide" : "Need help?"}
+        </button>
+      </p>
+
+      {showGuide && (
+        <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
+          <p className="text-xs font-medium">
+            Ollama needs to allow connections from this website. This is a one-time setup.
+          </p>
+
+          {/* macOS */}
+          <div className="space-y-1">
+            <p className="text-[11px] font-medium text-muted-foreground">macOS</p>
+            <p className="text-[11px] text-muted-foreground">Run in Terminal, then quit &amp; relaunch Ollama:</p>
+            <div className="flex items-center gap-1">
+              <code className="rounded bg-muted px-2 py-1 text-[11px] font-mono select-all block">
+                launchctl setenv OLLAMA_ORIGINS &quot;*&quot;
+              </code>
+              <CopyButton text='launchctl setenv OLLAMA_ORIGINS "*"' />
+            </div>
+          </div>
+
+          {/* Windows */}
+          <div className="space-y-1">
+            <p className="text-[11px] font-medium text-muted-foreground">Windows</p>
+            <p className="text-[11px] text-muted-foreground">Run in PowerShell, then quit &amp; relaunch Ollama:</p>
+            <div className="flex items-center gap-1">
+              <code className="rounded bg-muted px-2 py-1 text-[11px] font-mono select-all block whitespace-nowrap">
+                [System.Environment]::SetEnvironmentVariable(&quot;OLLAMA_ORIGINS&quot;, &quot;*&quot;, &quot;User&quot;)
+              </code>
+              <CopyButton text='[System.Environment]::SetEnvironmentVariable("OLLAMA_ORIGINS", "*", "User")' />
+            </div>
+          </div>
+
+          {/* Linux */}
+          <div className="space-y-1">
+            <p className="text-[11px] font-medium text-muted-foreground">Linux</p>
+            <p className="text-[11px] text-muted-foreground">Edit the systemd service, then restart:</p>
+            <div className="flex items-center gap-1">
+              <code className="rounded bg-muted px-2 py-1 text-[11px] font-mono select-all block">
+                sudo systemctl edit ollama
+              </code>
+              <CopyButton text="sudo systemctl edit ollama" />
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Add: <code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">Environment=&quot;OLLAMA_ORIGINS=*&quot;</code> under <code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">[Service]</code>, then{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-[10px] font-mono">sudo systemctl restart ollama</code>
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onRetry}
+          className="gap-1.5 text-xs"
+        >
+          <Wifi className="h-3.5 w-3.5" />
+          Retry
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onDisconnect}
+          className="gap-1.5 text-xs text-muted-foreground"
+        >
+          <WifiOff className="h-3.5 w-3.5" />
+          Disconnect
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function OllamaStatusBadge({ connected }: { connected: boolean | null }) {
   if (connected === null) return null;
   return connected ? (
@@ -1371,65 +1475,7 @@ export default function SettingsPage() {
                   </Button>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  <div className="flex items-start gap-1.5">
-                    <p className="text-xs text-muted-foreground">
-                      Ollama not detected.
-                    </p>
-                    <TooltipProvider delayDuration={200}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button className="mt-px text-muted-foreground/60 hover:text-muted-foreground transition-colors">
-                          <Info className="h-3.5 w-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-xs space-y-2 p-3 text-left">
-                        <p className="text-xs font-medium">Make sure Ollama is running and allows this site.</p>
-                        <p className="text-xs text-muted-foreground">
-                          If Ollama is running but not detected, you may need to allow cross-origin requests. Restart Ollama with:
-                        </p>
-                        <div className="flex items-center gap-1">
-                          <code className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono select-all">
-                            OLLAMA_ORIGINS=* ollama serve
-                          </code>
-                          <button
-                            className="rounded p-0.5 hover:bg-muted transition-colors"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigator.clipboard.writeText("OLLAMA_ORIGINS=* ollama serve");
-                            }}
-                          >
-                            <Copy className="h-3 w-3 text-muted-foreground" />
-                          </button>
-                        </div>
-                        <p className="text-[10px] text-muted-foreground/70">
-                          On Windows: <code className="rounded bg-muted px-1 py-0.5 font-mono select-all">set OLLAMA_ORIGINS=*</code> then run <code className="rounded bg-muted px-1 py-0.5 font-mono">ollama serve</code>
-                        </p>
-                      </TooltipContent>
-                    </Tooltip>
-                    </TooltipProvider>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => ollama.recheck()}
-                      className="gap-1.5 text-xs"
-                    >
-                      <Wifi className="h-3.5 w-3.5" />
-                      Retry
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => ollama.revoke()}
-                      className="gap-1.5 text-xs text-muted-foreground"
-                    >
-                      <WifiOff className="h-3.5 w-3.5" />
-                      Disconnect
-                    </Button>
-                  </div>
-                </div>
+                <OllamaSetupGuide onRetry={() => ollama.recheck()} onDisconnect={() => ollama.revoke()} />
               )}
             </div>
           </div>
