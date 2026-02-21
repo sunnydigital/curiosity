@@ -6,7 +6,7 @@ import { getProviderAsync } from "@/lib/llm/provider-registry";
 import { FailoverExecutor } from "@/lib/llm/failover";
 import { BRANCH_PROMPTS, DEFAULT_SYSTEM_PROMPT } from "@/lib/constants";
 import { onNewExchange } from "@/lib/memory/memory-manager";
-import type { LLMMessage, BranchCreationRequest, FailoverEvent } from "@/types";
+import type { LLMMessage, LLMProviderName, BranchCreationRequest, FailoverEvent } from "@/types";
 
 export async function POST(
   request: NextRequest,
@@ -63,9 +63,29 @@ export async function POST(
         let actualProvider = settings.activeProvider;
         let actualModel = settings.activeModel;
 
-        if (settings.failoverEnabled && settings.failoverChain.length > 0) {
+        // If active provider is Ollama, server can't reach localhost — use cloud fallback
+        let useProvider = settings.activeProvider;
+        let useModel = settings.activeModel;
+        if (settings.activeProvider === "ollama") {
+          const cloudFallbacks: { provider: LLMProviderName; model: string }[] = [
+            { provider: "anthropic", model: "claude-sonnet-4-5-20250929" },
+            { provider: "openai", model: "gpt-4o" },
+            { provider: "gemini", model: "gemini-2.0-flash" },
+          ];
+          for (const fb of cloudFallbacks) {
+            try {
+              await getProviderAsync(fb.provider, settings);
+              useProvider = fb.provider;
+              useModel = fb.model;
+              break;
+            } catch {}
+          }
+        }
+
+        if (settings.failoverEnabled && settings.failoverChain.length > 0 && useProvider !== "ollama") {
+          const overrideSettings = { ...settings, activeProvider: useProvider, activeModel: useModel };
           const executor = new FailoverExecutor({
-            settings,
+            settings: overrideSettings,
             onFailover: (evt: FailoverEvent) => {
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify(evt)}\n\n`)
@@ -74,7 +94,7 @@ export async function POST(
           });
 
           const gen = executor.stream({
-            model: settings.activeModel,
+            model: useModel,
             messages: llmMessages,
           });
 
@@ -94,9 +114,9 @@ export async function POST(
             }
           }
         } else {
-          const provider = await getProviderAsync(settings.activeProvider, settings);
+          const provider = await getProviderAsync(useProvider, settings);
           const gen = provider.stream({
-            model: settings.activeModel,
+            model: useModel,
             messages: llmMessages,
           });
 
