@@ -1,4 +1,4 @@
-import { getSettings } from "@/db/queries/settings";
+import { getSettingsAsync } from "@/db/queries/settings";
 import { getPreviewProviderAsync, getProviderAsync } from "@/lib/llm/provider-registry";
 import { FACT_EXTRACTION_PROMPT } from "@/lib/constants";
 import type { LLMProviderName } from "@/types";
@@ -7,33 +7,48 @@ export async function extractFacts(
   userMessage: string,
   assistantMessage: string
 ): Promise<string[]> {
-  const settings = getSettings();
+  const settings = await getSettingsAsync();
 
   // Resolve the effective preview provider (follows active provider unless overridden)
-  const effectiveProvider: LLMProviderName = settings.previewProviderOverride
+  let effectiveProvider: LLMProviderName = settings.previewProviderOverride
     ? settings.previewProvider
     : settings.activeProvider;
 
+  // Server can't reach local Ollama — fall back to cloud
+  if (effectiveProvider === "ollama") {
+    const cloudFallbacks: LLMProviderName[] = ["anthropic", "openai", "gemini"];
+    for (const fb of cloudFallbacks) {
+      try {
+        await getProviderAsync(fb, settings);
+        effectiveProvider = fb;
+        break;
+      } catch {}
+    }
+  }
+
   const previewModelMap: Record<LLMProviderName, string> = {
-    openai: settings.previewOpenaiModel,
-    anthropic: settings.previewAnthropicModel,
-    gemini: settings.previewGeminiModel,
-    ollama: settings.previewOllamaModel,
+    openai: settings.previewOpenaiModel || "gpt-4o-mini",
+    anthropic: settings.previewAnthropicModel || "claude-haiku-4-5-20251001",
+    gemini: settings.previewGeminiModel || "gemini-2.0-flash",
+    ollama: settings.previewOllamaModel || "",
   };
 
   const conversationToAnalyze = `User: ${userMessage}\n\nAssistant: ${assistantMessage}`;
 
-  // Try preview provider first, then fall back to active provider
+  // Try effective provider first, then cloud fallbacks
   const attempts: { provider: LLMProviderName; getProvider: () => Promise<any> }[] = [
-    { provider: effectiveProvider, getProvider: () => getPreviewProviderAsync(settings) },
+    { provider: effectiveProvider, getProvider: () => getProviderAsync(effectiveProvider, settings) },
   ];
 
-  // Add active provider as fallback if different from preview
-  if (effectiveProvider !== settings.activeProvider) {
-    attempts.push({
-      provider: settings.activeProvider,
-      getProvider: () => getProviderAsync(settings.activeProvider, settings),
-    });
+  // Add cloud fallbacks
+  const cloudFallbacks: LLMProviderName[] = ["anthropic", "openai", "gemini"];
+  for (const fb of cloudFallbacks) {
+    if (fb !== effectiveProvider) {
+      attempts.push({
+        provider: fb,
+        getProvider: () => getProviderAsync(fb, settings),
+      });
+    }
   }
 
   for (const attempt of attempts) {

@@ -60,11 +60,13 @@ export async function generateEmbedding(text: string): Promise<EmbeddingResult> 
   const settings = await getSettingsAsync();
 
   // Check if using local embeddings
-  if (settings.embeddingMode === "local") {
+  // Note: local Ollama embeddings won't work server-side on Vercel (can't reach localhost)
+  // Fall back to online if local backend is Ollama
+  if (settings.embeddingMode === "local" && settings.localEmbeddingBackend !== "ollama") {
     return generateLocalEmbeddingWrapper(text, settings);
   }
 
-  // Online embedding mode
+  // Online embedding mode (or Ollama local fallback)
   return generateOnlineEmbedding(text, settings);
 }
 
@@ -100,6 +102,15 @@ async function generateOnlineEmbedding(
   let effectiveProvider: LLMProviderName = settings.embeddingProviderOverride
     ? settings.embeddingProvider
     : settings.activeProvider;
+
+  // Server can't reach local Ollama — always use a cloud provider for embeddings
+  if (effectiveProvider === "ollama") {
+    for (const fallback of EMBEDDING_FALLBACK_ORDER) {
+      if (fallback === "ollama") continue; // skip Ollama
+      if (fallback === "openai" && settings.openaiApiKey) { effectiveProvider = "openai"; break; }
+      else if (fallback === "gemini" && settings.geminiApiKey) { effectiveProvider = "gemini"; break; }
+    }
+  }
 
   // If the resolved provider doesn't support embeddings natively, find a fallback
   if (!EMBEDDING_SUPPORTED_PROVIDERS.includes(effectiveProvider)) {
