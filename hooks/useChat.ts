@@ -211,6 +211,23 @@ export function useChat({ chatId }: UseChatOptions) {
             }
           } catch {}
 
+          // Client-side memory creation for Ollama (server can't reach localhost)
+          try {
+            const { createMemoriesClientSide } = await import("@/lib/memory/client-memory");
+            const embeddingModel = "nomic-embed-text";
+            await createMemoriesClientSide({
+              baseUrl: ollamaOptions.baseUrl,
+              chatModel: ollamaOptions.model,
+              embeddingModel,
+              chatId,
+              messageId: userMessage.id,
+              userContent: content,
+              assistantContent: fullContent,
+            });
+          } catch (err) {
+            console.warn("[useChat] Client-side memory creation failed:", err);
+          }
+
           return;
         }
 
