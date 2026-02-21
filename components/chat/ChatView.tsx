@@ -220,18 +220,53 @@ export function ChatView({ chatId }: ChatViewProps) {
     []
   );
 
-  // Restore the browser selection after re-render so the highlight persists
-  // (React re-rendering inline elements like <strong> or KaTeX spans can clear it)
+  // Restore the browser selection after re-render so the highlight persists.
+  // We walk the fresh DOM using charStart/charEnd offsets instead of restoring
+  // a stale cloned Range (whose nodes may have been recreated by React).
   useLayoutEffect(() => {
-    if (selectionState && selectionRangeRef.current) {
-      const selection = window.getSelection();
-      if (selection) {
-        try {
-          selection.removeAllRanges();
-          selection.addRange(selectionRangeRef.current);
-        } catch {
-          // Range nodes may have been detached; ignore
+    if (!selectionState) return;
+    const container = document.getElementById(
+      `message-content-${selectionState.messageId}`
+    );
+    if (!container) return;
+
+    const { charStart, charEnd } = selectionState;
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    let pos = 0;
+    let startNode: Text | null = null;
+    let startOffset = 0;
+    let endNode: Text | null = null;
+    let endOffset = 0;
+
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text;
+      const len = node.length;
+      if (!startNode && pos + len > charStart) {
+        startNode = node;
+        startOffset = charStart - pos;
+      }
+      if (pos + len >= charEnd) {
+        endNode = node;
+        endOffset = charEnd - pos;
+        break;
+      }
+      pos += len;
+    }
+
+    if (startNode && endNode) {
+      try {
+        const range = document.createRange();
+        range.setStart(startNode, startOffset);
+        range.setEnd(endNode, endOffset);
+        const sel = window.getSelection();
+        if (sel) {
+          sel.removeAllRanges();
+          sel.addRange(range);
         }
+        // Update the ref so toolbar position stays correct
+        selectionRangeRef.current = range;
+      } catch {
+        // Offsets may be out of bounds if content changed; ignore
       }
     }
   }, [selectionState]);
