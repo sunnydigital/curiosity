@@ -556,13 +556,7 @@ export default function SettingsPage() {
       if (data.oauthStatus) {
         setOauthStatus(data.oauthStatus);
       }
-      // Preserve client-side-only fields that the server doesn't persist
-      setSettings((prev) => ({
-        ...data,
-        embeddingMode: updates.embeddingMode ?? prev?.embeddingMode ?? data.embeddingMode,
-        localEmbeddingBackend: updates.localEmbeddingBackend ?? prev?.localEmbeddingBackend ?? data.localEmbeddingBackend,
-        localEmbeddingModel: updates.localEmbeddingModel ?? prev?.localEmbeddingModel ?? data.localEmbeddingModel,
-      }));
+      setSettings(data);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       return true;
