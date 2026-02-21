@@ -9,7 +9,7 @@ import { getAuthContext } from "@/lib/auth/helpers";
 import { checkRateLimit, incrementRateLimit } from "@/db/queries/rate-limits";
 import { getUserApiKey } from "@/db/queries/user-api-keys";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/constants";
-import type { LLMMessage, FailoverEvent } from "@/types";
+import type { LLMMessage, FailoverEvent, LLMProviderName } from "@/types";
 
 export async function POST(request: NextRequest) {
   try {
@@ -239,23 +239,22 @@ export async function POST(request: NextRequest) {
           ];
 
           let title = "";
-          try {
-            const titleProvider = await getPreviewProviderAsync(settings);
-            const r = await titleProvider.complete({
-              model: settings.previewModel,
-              messages: titleMessages,
-              temperature: 0.7,
-              maxTokens: 500,
-            });
-            title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
-          } catch {
+          // Ollama runs locally — server can't reach it. Use a cloud provider for title generation.
+          const cloudFallbacks: { provider: LLMProviderName; model: string }[] = [
+            { provider: "anthropic", model: settings.previewModel || "claude-haiku-4-5-20251001" },
+            { provider: "openai", model: "gpt-4o-mini" },
+            { provider: "gemini", model: "gemini-2.0-flash" },
+          ];
+
+          for (const fb of cloudFallbacks) {
+            if (title) break;
             try {
-              const fallbackProvider = await getProviderAsync(settings.activeProvider, settings);
-              const r = await fallbackProvider.complete({
-                model: settings.activeModel,
+              const fbProvider = await getProviderAsync(fb.provider, settings);
+              const r = await fbProvider.complete({
+                model: fb.model,
                 messages: titleMessages,
                 temperature: 0.7,
-                maxTokens: 500,
+                maxTokens: 30,
               });
               title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
             } catch {}
