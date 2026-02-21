@@ -170,12 +170,16 @@ export function MessageBubble({
             remarkPlugins={[remarkGfm, remarkMath]}
             rehypePlugins={[rehypeKatex]}
             components={{
+              h1: ({ children }) => <h1 className="text-2xl font-bold mt-4 mb-2">{children}</h1>,
+              h2: ({ children }) => <h2 className="text-xl font-semibold mt-3 mb-2">{children}</h2>,
+              h3: ({ children }) => <h3 className="text-lg font-semibold mt-3 mb-1">{children}</h3>,
+              h4: ({ children }) => <h4 className="text-base font-semibold mt-2 mb-1">{children}</h4>,
               code({ node, inline, className, children, ...props }: CodeProps) {
                 const match = /language-(\w+)/.exec(className || "");
+                const isBlock = !inline && (match || String(children).includes("\n"));
 
-                // If it's not inline and has a language, it's a code block
-                if (!inline && match) {
-                  const language = match[1];
+                if (isBlock) {
+                  const language = match?.[1];
                   const codeString = String(children).replace(/\n$/, "");
 
                   return (
@@ -190,18 +194,20 @@ export function MessageBubble({
                           <Copy className="h-3 w-3" />
                         </Button>
                       </div>
-                      <div className="absolute left-2 top-2 text-xs text-muted-foreground opacity-70">
-                        {language}
-                      </div>
+                      {language && (
+                        <div className="absolute left-2 top-2 text-xs text-muted-foreground opacity-70">
+                          {language}
+                        </div>
+                      )}
                       <SyntaxHighlighter
                         style={oneDark}
-                        language={language}
+                        language={language || "text"}
                         PreTag="div"
                         customStyle={{
                           margin: 0,
                           borderRadius: "0.5rem",
                           fontSize: "0.8rem",
-                          paddingTop: "2rem",
+                          paddingTop: language ? "2rem" : "1rem",
                         }}
                       >
                         {codeString}
