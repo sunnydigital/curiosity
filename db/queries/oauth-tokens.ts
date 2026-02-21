@@ -35,19 +35,19 @@ export function upsertPiCredentials(
 ): void {
   // Fire-and-forget async
   const db = getDb();
-  db.from('oauth_credentials')
-    .upsert({
-      provider,
-      access_token: (credentials as any).access,
-      refresh_token: (credentials as any).refresh || null,
-      expires_at: (credentials as any).expires,
-      account_id: (credentials as any).accountId || null,
-      tier: tier || 'unknown',
-      metadata: metadata || {},
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'provider' })
-    .then(() => {})
-    .catch((err: any) => console.error('[OAuth] Failed to store credentials:', err));
+  Promise.resolve(
+    db.from('oauth_credentials')
+      .upsert({
+        provider,
+        access_token: (credentials as any).access,
+        refresh_token: (credentials as any).refresh || null,
+        expires_at: (credentials as any).expires,
+        account_id: (credentials as any).accountId || null,
+        tier: tier || 'unknown',
+        metadata: metadata || {},
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'provider' })
+  ).catch((err: any) => console.error('[OAuth] Failed to store credentials:', err));
 }
 
 export function upsertOAuthTokens(_tokens: OAuthTokens): void {
@@ -60,7 +60,7 @@ export async function deleteOAuthCredentials(provider: LLMProviderName): Promise
 }
 
 export function deleteOAuthTokens(provider: LLMProviderName): void {
-  deleteOAuthCredentials(provider).catch(() => {});
+  Promise.resolve(deleteOAuthCredentials(provider)).catch(() => {});
 }
 
 export function isTokenExpired(_tokens: OAuthTokens): boolean {
@@ -73,11 +73,11 @@ export function updateSubscriptionInfo(
   metadata: Record<string, any>
 ): void {
   const db = getDb();
-  db.from('oauth_credentials')
-    .update({ tier, metadata, updated_at: new Date().toISOString() })
-    .eq('provider', provider)
-    .then(() => {})
-    .catch(() => {});
+  Promise.resolve(
+    db.from('oauth_credentials')
+      .update({ tier, metadata, updated_at: new Date().toISOString() })
+      .eq('provider', provider)
+  ).catch(() => {});
 }
 
 export async function getAllOAuthStatusAsync(): Promise<Record<
