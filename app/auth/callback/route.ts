@@ -34,11 +34,15 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
       return response;
     }
+
+    // Include error details in redirect for debugging
+    const errMsg = encodeURIComponent(error.message || 'Unknown error');
+    return NextResponse.redirect(`${origin}/auth/login?error=${errMsg}`);
   }
 
-  return NextResponse.redirect(`${origin}/auth/login?error=Could not authenticate`);
+  return NextResponse.redirect(`${origin}/auth/login?error=No+code+provided`);
 }
