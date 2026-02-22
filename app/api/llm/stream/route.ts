@@ -24,9 +24,9 @@ export async function POST(request: NextRequest) {
   const baseSettings = await getSettingsAsync();
   const settings = { ...baseSettings };
 
-  // Anonymous users can't use Ollama (local-only) — fall back to a cloud provider
-  // using the admin's global API key.
-  if (!auth.userId && settings.activeProvider === "ollama") {
+  // Vercel serverless can't reach local Ollama — fall back to a cloud provider.
+  // This applies to all users (anonymous and logged-in) when deployed to Vercel.
+  if (settings.activeProvider === "ollama") {
     const cloudFallbacks: { provider: LLMProviderName; keyField: string; model: string }[] = [
       { provider: "anthropic", keyField: "anthropicApiKey", model: settings.defaultAnthropicModel || "claude-haiku-4-5-20251001" },
       { provider: "openai", keyField: "openaiApiKey", model: settings.defaultOpenaiModel || "gpt-4o-mini" },
