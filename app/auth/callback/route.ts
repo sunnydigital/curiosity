@@ -38,19 +38,6 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
-    // DEBUG: Always return diagnostics (TEMPORARY)
-    {
-      return NextResponse.json({
-        exchangeError: error?.message || null,
-        hasSession: !!data?.session,
-        hasUser: !!data?.user,
-        userEmail: data?.user?.email || null,
-        cookiesCollected: cookiesToSet.map(c => ({ name: c.name, valueLen: c.value.length })),
-        requestCookies: request.cookies.getAll().map(c => c.name),
-        codePresent: !!code,
-      });
-    }
-
     if (!error) {
       const response = NextResponse.redirect(getRedirectUrl(next));
       // Apply all collected cookies to the redirect response
