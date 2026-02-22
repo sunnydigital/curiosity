@@ -85,14 +85,33 @@ export function MessageBubble({
 
     const range = selection.getRangeAt(0);
     const container = document.getElementById(`message-content-${message.id}`);
-    if (!container || !container.contains(range.startContainer)) return;
+    if (!container || !container.contains(range.startContainer) || !container.contains(range.endContainer)) return;
 
-    // Calculate character offsets relative to the message content
-    const preRange = document.createRange();
-    preRange.setStart(container, 0);
-    preRange.setEnd(range.startContainer, range.startOffset);
-    const charStart = preRange.toString().length;
-    const charEnd = charStart + text.length;
+    // Calculate character offsets by walking text nodes (matches restore logic)
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    let pos = 0;
+    let charStart = 0;
+    let charEnd = 0;
+    let foundStart = false;
+    let foundEnd = false;
+
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text;
+      const len = node.length;
+
+      if (!foundStart && node === range.startContainer) {
+        charStart = pos + range.startOffset;
+        foundStart = true;
+      }
+      if (!foundEnd && node === range.endContainer) {
+        charEnd = pos + range.endOffset;
+        foundEnd = true;
+        break;
+      }
+      pos += len;
+    }
+
+    if (!foundStart || !foundEnd) return;
 
     onTextSelect({
       messageId: message.id,
