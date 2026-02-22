@@ -523,6 +523,17 @@ export function ChatView({ chatId }: ChatViewProps) {
         {error && (
           <div className="border-t border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive">
             {error}
+            {(error.toLowerCase().includes("fetch failed") ||
+              error.toLowerCase().includes("econnrefused") ||
+              error.toLowerCase().includes("ollama")) && (
+              <div className="mt-1 text-xs opacity-80">
+                💡 If using Ollama locally, go to{" "}
+                <a href="/settings" className="underline font-medium hover:opacity-100">
+                  Settings
+                </a>{" "}
+                and click &quot;Detect Local Ollama&quot; to connect.
+              </div>
+            )}
           </div>
         )}
 
