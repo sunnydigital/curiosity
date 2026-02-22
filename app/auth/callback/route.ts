@@ -36,7 +36,21 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+    // DEBUG: Return diagnostics instead of redirecting
+    const debugMode = searchParams.get('debug') === '1';
+    if (debugMode) {
+      return NextResponse.json({
+        exchangeError: error?.message || null,
+        hasSession: !!data?.session,
+        hasUser: !!data?.user,
+        userEmail: data?.user?.email || null,
+        cookiesCollected: cookiesToSet.map(c => ({ name: c.name, valueLen: c.value.length })),
+        requestCookies: request.cookies.getAll().map(c => c.name),
+        codePresent: !!code,
+      });
+    }
 
     if (!error) {
       const response = NextResponse.redirect(getRedirectUrl(next));
@@ -44,7 +58,6 @@ export async function GET(request: NextRequest) {
       for (const { name, value, options } of cookiesToSet) {
         response.cookies.set(name, value, {
           ...options,
-          // Ensure cookies work on the custom domain
           path: '/',
         });
       }
