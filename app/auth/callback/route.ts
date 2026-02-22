@@ -8,14 +8,18 @@ export async function GET(request: NextRequest) {
 
   // Use the forwarded host (custom domain) rather than Vercel's internal URL
   const forwardedHost = request.headers.get('x-forwarded-host');
-  const forwardedProto = request.headers.get('x-forwarded-proto') ?? 'https';
-  const host = forwardedHost ?? request.headers.get('host') ?? 'localhost:3000';
-  const origin = `${forwardedProto}://${host}`;
+  const isLocalEnv = process.env.NODE_ENV === 'development';
+  const { origin } = new URL(request.url);
+
+  function getRedirectUrl(path: string) {
+    if (isLocalEnv) return `${origin}${path}`;
+    if (forwardedHost) return `https://${forwardedHost}${path}`;
+    return `${origin}${path}`;
+  }
 
   if (code) {
-    // Build a redirect response FIRST, then attach cookies to it
-    const redirectUrl = `${origin}${next}`;
-    const response = NextResponse.redirect(redirectUrl);
+    // Collect cookies to set on the final response
+    const cookiesToSet: { name: string; value: string; options?: any }[] = [];
 
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,24 +29,31 @@ export async function GET(request: NextRequest) {
           getAll() {
             return request.cookies.getAll();
           },
-          setAll(cookiesToSet: { name: string; value: string; options?: any }[]) {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              response.cookies.set(name, value, options);
-            });
+          setAll(cookies: { name: string; value: string; options?: any }[]) {
+            cookiesToSet.push(...cookies);
           },
         },
       }
     );
 
-    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+
     if (!error) {
+      const response = NextResponse.redirect(getRedirectUrl(next));
+      // Apply all collected cookies to the redirect response
+      for (const { name, value, options } of cookiesToSet) {
+        response.cookies.set(name, value, {
+          ...options,
+          // Ensure cookies work on the custom domain
+          path: '/',
+        });
+      }
       return response;
     }
 
-    // Include error details in redirect for debugging
     const errMsg = encodeURIComponent(error.message || 'Unknown error');
-    return NextResponse.redirect(`${origin}/auth/login?error=${errMsg}`);
+    return NextResponse.redirect(getRedirectUrl(`/auth/login?error=${errMsg}`));
   }
 
-  return NextResponse.redirect(`${origin}/auth/login?error=No+code+provided`);
+  return NextResponse.redirect(getRedirectUrl('/auth/login?error=No+code+provided'));
 }
