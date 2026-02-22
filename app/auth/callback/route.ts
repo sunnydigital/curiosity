@@ -38,9 +38,8 @@ export async function GET(request: NextRequest) {
 
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
-    // DEBUG: Return diagnostics instead of redirecting
-    const debugMode = searchParams.get('debug') === '1';
-    if (debugMode) {
+    // DEBUG: Always return diagnostics (TEMPORARY)
+    {
       return NextResponse.json({
         exchangeError: error?.message || null,
         hasSession: !!data?.session,
