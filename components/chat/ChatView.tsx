@@ -440,7 +440,7 @@ export function ChatView({ chatId }: ChatViewProps) {
         )}
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden" ref={scrollRef}>
-          <div className="mx-auto max-w-3xl px-2 md:px-4">
+          <div className="mx-auto max-w-3xl px-1 md:px-4">
             {displayMessages.length === 0 && !isLoading && (
               <div className="flex h-full items-center justify-center pt-20">
                 <div className="text-center">

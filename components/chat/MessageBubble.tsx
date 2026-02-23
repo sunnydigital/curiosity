@@ -167,7 +167,7 @@ export function MessageBubble({
       </div>
       <div
         className={cn(
-          "relative rounded-lg px-4 overflow-hidden",
+          "relative rounded-lg px-2 md:px-4 overflow-hidden",
           isUser
             ? "max-w-[85%] md:max-w-[50%] bg-primary text-primary-foreground py-0.2"
             : "max-w-[100%] bg-muted text-foreground py-3"
