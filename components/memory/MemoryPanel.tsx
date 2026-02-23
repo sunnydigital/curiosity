@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Brain, Database, Plus, Trash2, X, AlertTriangle, RefreshCw, ChevronDown, ChevronRight, ArrowLeft } from "lucide-react";
+import { Brain, Database, Plus, Trash2, X, AlertTriangle, RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -313,25 +313,16 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
 
   if (!isOpen) return null;
 
-  return (
-    <div className={`flex h-full flex-col border-l border-border bg-background ${isMobile ? "w-full" : "w-80"}`}>
+  const panelContent = (
+    <>
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        {isMobile ? (
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <ArrowLeft className="mr-1 h-4 w-4" />
-            Back to chat
-          </Button>
-        ) : (
-          <>
-            <div className="flex items-center gap-2">
-              <Brain className="h-4 w-4" />
-              <span className="text-sm font-medium">Memory</span>
-            </div>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
-              <X className="h-4 w-4" />
-            </Button>
-          </>
-        )}
+        <div className="flex items-center gap-2">
+          <Brain className="h-4 w-4" />
+          <span className="text-sm font-medium">Memory</span>
+        </div>
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+          <X className="h-4 w-4" />
+        </Button>
       </div>
 
       <div className="flex border-b border-border">
@@ -571,6 +562,20 @@ export function MemoryPanel({ isOpen, onClose }: MemoryPanelProps) {
           </div>
         )}
       </ScrollArea>
+    </>
+  );
+
+  if (isMobile) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col bg-background">
+        {panelContent}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full w-80 flex-col border-l border-border bg-background">
+      {panelContent}
     </div>
   );
 }

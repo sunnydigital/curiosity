@@ -67,14 +67,6 @@ export function ChatView({ chatId }: ChatViewProps) {
   const selectionRangeRef = useRef<Range | null>(null);
   const [showTree, setShowTree] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-
-  useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
-    check();
-    window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
-  }, []);
   const [chatTitle, setChatTitle] = useState("New Chat");
   const [activeModel, setActiveModel] = useState("");
   const [activeProvider, setActiveProvider] = useState("");
@@ -427,32 +419,10 @@ export function ChatView({ chatId }: ChatViewProps) {
   }, []);
 
   const isOnBranch = activePath.length > 0;
-  const mobilePanel = isMobile && (showTree || showMemory);
 
   return (
     <div className="flex h-full">
-      {/* On mobile, when a panel is open, hide the chat entirely */}
-      {mobilePanel && showTree && (
-        <div className="flex h-full w-full flex-col bg-background">
-          <TreePanel
-            messages={treeMessages}
-            activeIds={activeIds}
-            isOpen={true}
-            onClose={() => setShowTree(false)}
-            onNodeClick={handleTreeNodeClick}
-            onDeleteBranch={handleDeleteBranch}
-          />
-        </div>
-      )}
-      {mobilePanel && showMemory && (
-        <div className="flex h-full w-full flex-col bg-background">
-          <MemoryPanel
-            isOpen={true}
-            onClose={() => setShowMemory(false)}
-          />
-        </div>
-      )}
-      <div className={`flex flex-1 flex-col ${mobilePanel ? "hidden" : ""}`}>
+      <div className="flex flex-1 flex-col min-w-0">
         {isOnBranch && (
           <div className="flex items-center gap-2 border-b border-border px-4 py-2">
             <Button
@@ -469,8 +439,8 @@ export function ChatView({ chatId }: ChatViewProps) {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto" ref={scrollRef}>
-          <div className="mx-auto max-w-3xl px-4">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden" ref={scrollRef}>
+          <div className="mx-auto max-w-3xl px-2 md:px-4">
             {displayMessages.length === 0 && !isLoading && (
               <div className="flex h-full items-center justify-center pt-20">
                 <div className="text-center">
@@ -596,23 +566,19 @@ export function ChatView({ chatId }: ChatViewProps) {
         />
       </div>
 
-      {!isMobile && (
-        <TreePanel
-          messages={treeMessages}
-          activeIds={activeIds}
-          isOpen={showTree}
-          onClose={() => setShowTree(false)}
-          onNodeClick={handleTreeNodeClick}
-          onDeleteBranch={handleDeleteBranch}
-        />
-      )}
+      <TreePanel
+        messages={treeMessages}
+        activeIds={activeIds}
+        isOpen={showTree}
+        onClose={() => setShowTree(false)}
+        onNodeClick={handleTreeNodeClick}
+        onDeleteBranch={handleDeleteBranch}
+      />
 
-      {!isMobile && (
-        <MemoryPanel
-          isOpen={showMemory}
-          onClose={() => setShowMemory(false)}
-        />
-      )}
+      <MemoryPanel
+        isOpen={showMemory}
+        onClose={() => setShowMemory(false)}
+      />
     </div>
   );
 }

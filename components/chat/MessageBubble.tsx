@@ -167,9 +167,9 @@ export function MessageBubble({
       </div>
       <div
         className={cn(
-          "relative rounded-lg px-4",
+          "relative rounded-lg px-4 overflow-hidden",
           isUser
-            ? "max-w-[50%] bg-primary text-primary-foreground py-0.2"
+            ? "max-w-[85%] md:max-w-[50%] bg-primary text-primary-foreground py-0.2"
             : "max-w-[100%] bg-muted text-foreground py-3"
         )}
       >
@@ -182,7 +182,8 @@ export function MessageBubble({
 
         <div
           id={`message-content-${message.id}`}
-          className="prose prose-sm dark:prose-invert max-w-none text-sm prose-p:my-2 prose-headings:my-3 prose-pre:p-0 prose-pre:bg-transparent prose-code:before:content-none prose-code:after:content-none [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto"
+          className="prose prose-sm dark:prose-invert max-w-none text-sm prose-p:my-2 prose-headings:my-3 prose-pre:p-0 prose-pre:bg-transparent prose-pre:overflow-x-auto prose-code:before:content-none prose-code:after:content-none [&_.katex-display]:my-4 [&_.katex-display]:overflow-x-auto break-words overflow-wrap-anywhere [&_table]:block [&_table]:overflow-x-auto"
+          style={{ overflowWrap: "anywhere" }}
           onMouseUp={handleMouseUp}
         >
           <Markdown
@@ -227,6 +228,8 @@ export function MessageBubble({
                           borderRadius: "0.5rem",
                           fontSize: "0.8rem",
                           paddingTop: language ? "2rem" : "1rem",
+                          overflowX: "auto",
+                          maxWidth: "100%",
                         }}
                       >
                         {codeString}
