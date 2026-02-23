@@ -13,7 +13,8 @@ export interface RetrievedMemory {
 export async function retrieveRelevantMemories(
   queryText: string,
   topK: number = MEMORY_TOP_K,
-  preComputedEmbedding?: { embedding: number[]; model: string }
+  preComputedEmbedding?: { embedding: number[]; model: string },
+  userId?: string | null
 ): Promise<RetrievedMemory[]> {
   const settings = await getSettingsAsync();
   if (!settings.memoryEnabled) return [];
@@ -29,6 +30,7 @@ export async function retrieveRelevantMemories(
       temporalWeight: settings.temporalWeight,
       topK,
       embeddingModel: queryModel,
+      userId,
     });
 
     const kbEntries = await searchKBEntries(queryEmbedding, topK, undefined, queryModel);

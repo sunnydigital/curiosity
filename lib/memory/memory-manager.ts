@@ -11,7 +11,8 @@ export async function onNewExchange(
   chatId: string,
   userMessageId: string,
   userContent: string,
-  assistantContent: string
+  assistantContent: string,
+  userId?: string | null
 ): Promise<void> {
   const settings = await getSettingsAsync();
   console.log("[MemoryManager] onNewExchange called, memoryEnabled:", settings.memoryEnabled);
@@ -36,6 +37,7 @@ export async function onNewExchange(
         sourceMessageId: userMessageId,
         embedding,
         embeddingModel: model,
+        userId,
       });
       console.log("[MemoryManager] Memory created successfully");
     }
@@ -46,13 +48,14 @@ export async function onNewExchange(
 
 export async function getMemoryContext(
   currentMessage: string,
-  preComputedEmbedding?: { embedding: number[]; model: string }
+  preComputedEmbedding?: { embedding: number[]; model: string },
+  userId?: string | null
 ): Promise<string | null> {
   const settings = await getSettingsAsync();
   if (!settings.memoryEnabled) return null;
 
   try {
-    const memories = await retrieveRelevantMemories(currentMessage, undefined, preComputedEmbedding);
+    const memories = await retrieveRelevantMemories(currentMessage, undefined, preComputedEmbedding, userId);
     return formatMemoriesForContext(memories);
   } catch {
     return null;

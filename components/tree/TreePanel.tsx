@@ -56,7 +56,43 @@ export function TreePanel({
     };
   }, []);
 
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
   if (!isOpen) return null;
+
+  // Mobile: render as modal overlay
+  if (isMobile) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+        <div
+          className="relative flex h-[80vh] w-[90vw] max-w-lg flex-col rounded-lg border border-border bg-background shadow-lg"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+            <span className="text-sm font-medium">Chat Tree</span>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex-1 overflow-auto">
+            <TreeVisualization
+              messages={messages}
+              activeIds={activeIds}
+              onNodeClick={onNodeClick}
+              onDeleteBranch={onDeleteBranch}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

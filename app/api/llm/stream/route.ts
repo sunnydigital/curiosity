@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
     const preComputedEmb = queryEmbedding?.embedding && queryEmbedding?.model
       ? { embedding: queryEmbedding.embedding as number[], model: queryEmbedding.model as string }
       : undefined;
-    const memoryContext = await getMemoryContext(content, preComputedEmb);
+    const memoryContext = await getMemoryContext(content, preComputedEmb, auth.userId);
     if (memoryContext) {
       llmMessages.push({ role: "system", content: memoryContext });
     }

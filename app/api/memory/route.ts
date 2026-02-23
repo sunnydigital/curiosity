@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
       const preComputed = embeddingParam && modelParam
         ? { embedding: JSON.parse(embeddingParam) as number[], model: modelParam }
         : undefined;
-      const memories = await retrieveRelevantMemories(query, undefined, preComputed);
+      const memories = await retrieveRelevantMemories(query, undefined, preComputed, auth.userId);
       return NextResponse.json(memories);
     } catch (error: any) {
       return NextResponse.json({ error: error.message }, { status: 500 });

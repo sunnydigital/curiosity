@@ -51,12 +51,13 @@ export function MessageInput({
     }
   }, [initialContent, onInitialContentConsumed]);
 
-  // Auto-resize textarea to fit content (no max height cap)
+  // Auto-resize textarea to fit content (capped to avoid filling the screen on mobile)
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
     textarea.style.height = "auto";
-    textarea.style.height = `${textarea.scrollHeight}px`;
+    const maxH = Math.min(textarea.scrollHeight, window.innerHeight * 0.35);
+    textarea.style.height = `${maxH}px`;
   }, [content]);
 
   // Auto-dismiss notification
@@ -154,7 +155,7 @@ export function MessageInput({
           size="icon"
           onClick={handleImageClick}
           title="Attach image"
-          className="shrink-0 self-stretch h-auto w-10"
+          className="shrink-0 self-end h-10 w-10"
         >
           <ImagePlus className="h-4 w-4" />
         </Button>
@@ -164,12 +165,12 @@ export function MessageInput({
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
-          className="min-h-0 resize-none overflow-hidden py-2 leading-5"
+          className="min-h-0 max-h-[35vh] resize-none overflow-y-auto py-2 leading-5"
           rows={1}
           disabled={disabled}
         />
         {isLoading ? (
-          <Button variant="destructive" size="icon" onClick={onStop} className="shrink-0 self-stretch h-auto w-10">
+          <Button variant="destructive" size="icon" onClick={onStop} className="shrink-0 self-end h-10 w-10">
             <Square className="h-4 w-4" />
           </Button>
         ) : (
@@ -177,7 +178,7 @@ export function MessageInput({
             size="icon"
             onClick={handleSubmit}
             disabled={!content.trim() || disabled}
-            className="shrink-0 self-stretch h-auto w-10"
+            className="shrink-0 self-end h-10 w-10"
           >
             <Send className="h-4 w-4" />
           </Button>
