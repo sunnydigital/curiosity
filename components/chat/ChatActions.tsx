@@ -87,7 +87,7 @@ export function ChatActions({ chatId, chatTitle, messages }: ChatActionsProps) {
   }, [chatId, chatTitle]);
 
   return (
-    <div className="flex items-center justify-center gap-1 py-3">
+    <div className="flex items-center justify-center gap-1 py-3 flex-wrap max-w-full px-2">
       <Button
         variant="ghost"
         size="sm"
