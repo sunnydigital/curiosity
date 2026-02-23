@@ -61,7 +61,13 @@ export function Sidebar() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    // Start collapsed on mobile (< 768px)
+    if (typeof window !== "undefined") {
+      return window.innerWidth < 768;
+    }
+    return false;
+  });
   const [bulbHovered, setBulbHovered] = useState(false);
 
   // Delete / Rename modals
