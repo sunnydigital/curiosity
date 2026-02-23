@@ -67,6 +67,14 @@ export function ChatView({ chatId }: ChatViewProps) {
   const selectionRangeRef = useRef<Range | null>(null);
   const [showTree, setShowTree] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
   const [chatTitle, setChatTitle] = useState("New Chat");
   const [activeModel, setActiveModel] = useState("");
   const [activeProvider, setActiveProvider] = useState("");
@@ -419,10 +427,32 @@ export function ChatView({ chatId }: ChatViewProps) {
   }, []);
 
   const isOnBranch = activePath.length > 0;
+  const mobilePanel = isMobile && (showTree || showMemory);
 
   return (
     <div className="flex h-full">
-      <div className="flex flex-1 flex-col">
+      {/* On mobile, when a panel is open, hide the chat entirely */}
+      {mobilePanel && showTree && (
+        <div className="flex h-full w-full flex-col bg-background">
+          <TreePanel
+            messages={treeMessages}
+            activeIds={activeIds}
+            isOpen={true}
+            onClose={() => setShowTree(false)}
+            onNodeClick={handleTreeNodeClick}
+            onDeleteBranch={handleDeleteBranch}
+          />
+        </div>
+      )}
+      {mobilePanel && showMemory && (
+        <div className="flex h-full w-full flex-col bg-background">
+          <MemoryPanel
+            isOpen={true}
+            onClose={() => setShowMemory(false)}
+          />
+        </div>
+      )}
+      <div className={`flex flex-1 flex-col ${mobilePanel ? "hidden" : ""}`}>
         {isOnBranch && (
           <div className="flex items-center gap-2 border-b border-border px-4 py-2">
             <Button
@@ -566,19 +596,23 @@ export function ChatView({ chatId }: ChatViewProps) {
         />
       </div>
 
-      <TreePanel
-        messages={treeMessages}
-        activeIds={activeIds}
-        isOpen={showTree}
-        onClose={() => setShowTree(false)}
-        onNodeClick={handleTreeNodeClick}
-        onDeleteBranch={handleDeleteBranch}
-      />
+      {!isMobile && (
+        <TreePanel
+          messages={treeMessages}
+          activeIds={activeIds}
+          isOpen={showTree}
+          onClose={() => setShowTree(false)}
+          onNodeClick={handleTreeNodeClick}
+          onDeleteBranch={handleDeleteBranch}
+        />
+      )}
 
-      <MemoryPanel
-        isOpen={showMemory}
-        onClose={() => setShowMemory(false)}
-      />
+      {!isMobile && (
+        <MemoryPanel
+          isOpen={showMemory}
+          onClose={() => setShowMemory(false)}
+        />
+      )}
     </div>
   );
 }
