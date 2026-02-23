@@ -67,10 +67,14 @@ export async function getMemory(id: string): Promise<Memory | null> {
 }
 
 export async function getAllMemories(userId?: string | null): Promise<Memory[]> {
+  // Anonymous users (no userId) should not see any memories
+  if (!userId) return [];
   const db = getDb();
-  let q = db.from('memories').select('*').order('created_at', { ascending: false });
-  if (userId) q = q.eq('user_id', userId);
-  const { data, error } = await q;
+  const { data, error } = await db
+    .from('memories')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
   if (error || !data) return [];
   return data.map(rowToMemory);
 }
