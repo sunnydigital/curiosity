@@ -165,7 +165,7 @@ export function MessageInput({
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
-          className="min-h-0 max-h-[35vh] resize-none overflow-y-auto py-2 leading-5"
+          className="min-h-0 max-h-[25vh] md:max-h-[35vh] resize-none overflow-y-auto py-2 leading-5 text-sm md:text-base"
           rows={1}
           disabled={disabled}
         />

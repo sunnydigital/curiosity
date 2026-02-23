@@ -458,7 +458,13 @@ export function Sidebar() {
 
   // ─── Expanded state ───
   return (
-    <div className="relative flex w-96 flex-col border-r border-border bg-background transition-[width] duration-200">
+    <>
+    {/* Mobile backdrop */}
+    <div
+      className="fixed inset-0 z-40 bg-black/50 md:hidden"
+      onClick={() => setCollapsed(true)}
+    />
+    <div className="relative flex w-[85vw] md:w-96 flex-col border-r border-border bg-background transition-[width] duration-200 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-xl">
       {/* Header */}
       <div className="flex h-12 items-center justify-between px-4">
         <h2
@@ -683,5 +689,6 @@ export function Sidebar() {
 
       {projectModal}
     </div>
+    </>
   );
 }
