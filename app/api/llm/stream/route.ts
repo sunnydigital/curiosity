@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
 
   // Rate limit only applies to anonymous users (not logged-in, not using own key)
   if (!auth.userId) {
-    const ip = auth.anonIp || '127.0.0.1';
+    const ip = auth.anonId || 'unknown';
     const rateLimit = await checkRateLimit(ip);
     if (rateLimit.isLimited) {
       const encoder = new TextEncoder();

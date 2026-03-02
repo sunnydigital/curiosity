@@ -13,7 +13,7 @@ function rowToChat(row: any): Chat {
   };
 }
 
-export async function createChat(title?: string, userId?: string | null, anonIp?: string | null): Promise<Chat> {
+export async function createChat(title?: string, userId?: string | null, anonId?: string | null): Promise<Chat> {
   const db = getDb();
   const id = uuidv4();
   const { data, error } = await db
@@ -22,7 +22,7 @@ export async function createChat(title?: string, userId?: string | null, anonIp?
       id,
       title: title || 'New Chat',
       user_id: userId || null,
-      anon_ip: anonIp || null,
+      anon_ip: anonId || null,
     })
     .select()
     .single();
@@ -31,13 +31,13 @@ export async function createChat(title?: string, userId?: string | null, anonIp?
   return rowToChat(data);
 }
 
-export async function getChatIfOwned(chatId: string, userId: string | null, anonIp: string | null): Promise<Chat | null> {
+export async function getChatIfOwned(chatId: string, userId: string | null, anonId: string | null): Promise<Chat | null> {
   const db = getDb();
   let q = db.from('chats').select('*').eq('id', chatId);
   if (userId) {
     q = q.eq('user_id', userId);
-  } else if (anonIp) {
-    q = q.eq('anon_ip', anonIp).is('user_id', null);
+  } else if (anonId) {
+    q = q.eq('anon_ip', anonId).is('user_id', null);
   } else {
     return null;
   }
@@ -58,14 +58,14 @@ export async function getChat(id: string): Promise<Chat | null> {
   return rowToChat(data);
 }
 
-export async function listChats(userId?: string | null, anonIp?: string | null, query?: string): Promise<Chat[]> {
+export async function listChats(userId?: string | null, anonId?: string | null, query?: string): Promise<Chat[]> {
   const db = getDb();
   let q = db.from('chats').select('*');
 
   if (userId) {
     q = q.eq('user_id', userId);
-  } else if (anonIp) {
-    q = q.eq('anon_ip', anonIp).is('user_id', null);
+  } else if (anonId) {
+    q = q.eq('anon_ip', anonId).is('user_id', null);
   } else {
     return [];
   }
@@ -119,12 +119,12 @@ export async function starChat(id: string, starred: boolean): Promise<void> {
   await db.from('chats').update({ starred, updated_at: new Date().toISOString() }).eq('id', id);
 }
 
-export async function migrateAnonChatsToUser(anonIp: string, userId: string): Promise<number> {
+export async function migrateAnonChatsToUser(anonId: string, userId: string): Promise<number> {
   const db = getDb();
   const { data, error } = await db
     .from('chats')
     .update({ user_id: userId, anon_ip: null })
-    .eq('anon_ip', anonIp)
+    .eq('anon_ip', anonId)
     .is('user_id', null)
     .select('id');
 

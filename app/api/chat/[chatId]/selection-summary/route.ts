@@ -88,7 +88,7 @@ export async function POST(
   const { getChatIfOwned } = await import("@/db/queries/chats");
   const { getAuthContext } = await import("@/lib/auth/helpers");
   const auth = await getAuthContext(request);
-  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonIp);
+  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonId);
   if (!chat) {
     return NextResponse.json({ error: "Chat not found" }, { status: 404 });
   }

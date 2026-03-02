@@ -4,6 +4,6 @@ import { getAuthContext } from "@/lib/auth/helpers";
 
 export async function POST(request: NextRequest) {
   const auth = await getAuthContext(request);
-  const chat = await createChat(undefined, auth.userId, auth.anonIp);
+  const chat = await createChat(undefined, auth.userId, auth.anonId);
   return NextResponse.json(chat);
 }

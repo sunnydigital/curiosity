@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Anonymous — include rate limit info
-  const rateLimit = await checkRateLimit(auth.anonIp || '127.0.0.1');
+  const rateLimit = await checkRateLimit(auth.anonId || 'unknown');
   return NextResponse.json({
     authenticated: false,
     rateLimit: {

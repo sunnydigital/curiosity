@@ -8,11 +8,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
-  // Get the IP to find anonymous chats
-  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-    || request.headers.get('x-real-ip')
-    || '127.0.0.1';
+  // Get the anon cookie to find anonymous chats to migrate
+  const anonId = request.cookies.get('curiosity-anon-id')?.value;
+  if (!anonId) {
+    return NextResponse.json({ migrated: 0 });
+  }
 
-  const migrated = await migrateAnonChatsToUser(ip, auth.userId);
+  const migrated = await migrateAnonChatsToUser(anonId, auth.userId);
   return NextResponse.json({ migrated });
 }

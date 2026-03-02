@@ -9,7 +9,7 @@ export async function GET(
 ) {
   const { chatId } = await params;
   const auth = await getAuthContext(request);
-  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonIp);
+  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonId);
   if (!chat) {
     return NextResponse.json({ error: "Chat not found" }, { status: 404 });
   }
@@ -22,7 +22,7 @@ export async function PATCH(
 ) {
   const { chatId } = await params;
   const auth = await getAuthContext(request);
-  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonIp);
+  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonId);
   if (!chat) {
     return NextResponse.json({ error: "Chat not found" }, { status: 404 });
   }
@@ -46,7 +46,7 @@ export async function DELETE(
 ) {
   const { chatId } = await params;
   const auth = await getAuthContext(request);
-  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonIp);
+  const chat = await getChatIfOwned(chatId, auth.userId, auth.anonId);
   if (!chat) {
     return NextResponse.json({ error: "Chat not found" }, { status: 404 });
   }

@@ -11,7 +11,7 @@ export async function POST(
 ) {
   const { chatId } = await params;
   const auth = await getAuthContext(request);
-  const ownedChat = await getChatIfOwned(chatId, auth.userId, auth.anonIp);
+  const ownedChat = await getChatIfOwned(chatId, auth.userId, auth.anonId);
   if (!ownedChat) {
     return NextResponse.json({ error: "Chat not found" }, { status: 404 });
   }

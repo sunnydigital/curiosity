@@ -5,7 +5,7 @@ export interface AuthContext {
   userId: string | null;
   email: string | null;
   isAdmin: boolean;
-  anonIp: string | null;
+  anonId: string | null;
 }
 
 const ADMIN_EMAIL = 'sunnys2327@gmail.com';
@@ -20,22 +20,20 @@ export async function getAuthContext(request?: NextRequest): Promise<AuthContext
         userId: user.id,
         email: user.email || null,
         isAdmin: user.email === ADMIN_EMAIL,
-        anonIp: null,
+        anonId: null,
       };
     }
   } catch {
     // Not authenticated
   }
 
-  // Anonymous user — get IP
-  const ip = request?.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-    || request?.headers.get('x-real-ip')
-    || '127.0.0.1';
+  // Anonymous user — use session cookie for isolation
+  const anonId = request?.cookies.get('curiosity-anon-id')?.value || null;
 
   return {
     userId: null,
     email: null,
     isAdmin: false,
-    anonIp: ip,
+    anonId,
   };
 }
