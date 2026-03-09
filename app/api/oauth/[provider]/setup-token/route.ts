@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { upsertOAuthTokens } from "@/db/queries/oauth-tokens";
+import { upsertPiCredentials } from "@/db/queries/oauth-tokens";
 import { updateSettings } from "@/db/queries/settings";
 import { fetchSubscriptionTier } from "@/lib/oauth/subscription-info";
 import { DEFAULT_MODELS } from "@/lib/llm/model-equivalents";
 import type { LLMProviderName, AuthMode } from "@/types";
 
-const ANTHROPIC_SETUP_TOKEN_PREFIX = "sk-ant-oat01-";
-const ANTHROPIC_SETUP_TOKEN_MIN_LENGTH = 80;
+const ANTHROPIC_SETUP_TOKEN_PREFIXES = ["sk-ant-oat01-", "sk-ant-oat02-", "sk-ant-"];
+const ANTHROPIC_SETUP_TOKEN_MIN_LENGTH = 40;
 
 /**
  * Save a long-lived setup token (e.g. from `claude setup-token`).
@@ -34,9 +34,9 @@ export async function POST(
     return NextResponse.json({ error: "Missing token" }, { status: 400 });
   }
 
-  if (!token.startsWith(ANTHROPIC_SETUP_TOKEN_PREFIX)) {
+  if (!ANTHROPIC_SETUP_TOKEN_PREFIXES.some(p => token.startsWith(p))) {
     return NextResponse.json(
-      { error: `Invalid token format. Expected a token starting with ${ANTHROPIC_SETUP_TOKEN_PREFIX} (from \`claude setup-token\`).` },
+      { error: `Invalid token format. Expected a token starting with sk-ant- (from \`claude setup-token\`).` },
       { status: 400 }
     );
   }
@@ -78,18 +78,17 @@ export async function POST(
     // Fetch subscription tier using the validated token
     const { tier, metadata } = await fetchSubscriptionTier(providerName, token);
 
-    // Store as OAuth token — setup tokens are long-lived (1 year),
-    // no refresh token available
-    upsertOAuthTokens({
-      provider: providerName,
-      accessToken: token,
-      refreshToken: null,
-      tokenType: "Bearer",
-      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-      scope: "user:inference",
-      subscriptionTier: tier,
-      subscriptionMetadata: { method: "setup-token", ...metadata },
-    });
+    // Store as OAuth credentials — setup tokens are long-lived (1 year)
+    upsertPiCredentials(
+      providerName,
+      {
+        access: token,
+        refresh: null,
+        expires: Date.now() + 365 * 24 * 60 * 60 * 1000,
+      } as any,
+      tier as any,
+      { method: "setup-token", ...metadata },
+    );
 
     // Switch auth mode to oauth so provider-registry uses Bearer auth,
     // and auto-switch to this provider
