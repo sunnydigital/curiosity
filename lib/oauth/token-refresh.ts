@@ -1,6 +1,6 @@
 import type { LLMProviderName, AuthMode } from "@/types";
 import { getSettings } from "@/db/queries/settings";
-import { getPiCredentials, upsertPiCredentials } from "@/db/queries/oauth-tokens";
+import { getPiCredentialsAsync, upsertPiCredentials } from "@/db/queries/oauth-tokens";
 import {
   refreshCredentials,
   getApiKeyFromCredentials,
@@ -28,7 +28,7 @@ export async function getValidAccessToken(
     );
   }
 
-  const credentials = getPiCredentials(provider);
+  const credentials = await getPiCredentialsAsync(provider);
   if (!credentials) {
     throw new Error(
       `No OAuth tokens found for ${provider}. Please sign in first.`
