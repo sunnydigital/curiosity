@@ -23,6 +23,7 @@ interface UseOllamaResult {
   allow: () => void;
   revoke: () => void;
   recheck: () => Promise<void>;
+  lastError: string | null;
 }
 
 export function useOllama(): UseOllamaResult {
@@ -30,6 +31,7 @@ export function useOllama(): UseOllamaResult {
   const [isAvailable, setIsAvailable] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [lastError, setLastError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Read permission from localStorage on mount
@@ -43,19 +45,24 @@ export function useOllama(): UseOllamaResult {
 
   const check = useCallback(async () => {
     setIsLoading(true);
+    setLastError(null);
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3000);
       const res = await fetch(`${OLLAMA_BASE_URL}/api/tags`, {
         signal: controller.signal,
+        mode: "cors",
       });
       clearTimeout(timeout);
-      if (!res.ok) throw new Error("not ok");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const modelNames: string[] = (data.models || []).map((m: any) => m.name);
       setModels(modelNames);
       setIsAvailable(true);
-    } catch {
+    } catch (err: any) {
+      const msg = err?.name === "AbortError" ? "Connection timed out" : err?.message || "Connection failed";
+      console.warn(`[Ollama] Detection failed: ${msg}`);
+      setLastError(msg);
       setModels([]);
       setIsAvailable(false);
     } finally {
@@ -95,5 +102,5 @@ export function useOllama(): UseOllamaResult {
 
   const embeddingModels = models.filter(isEmbeddingModel);
 
-  return { isAvailable, models, embeddingModels, baseUrl: OLLAMA_BASE_URL, isLoading, permitted, allow, revoke, recheck: check };
+  return { isAvailable, models, embeddingModels, baseUrl: OLLAMA_BASE_URL, isLoading, permitted, allow, revoke, recheck: check, lastError };
 }
