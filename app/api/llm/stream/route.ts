@@ -89,9 +89,11 @@ export async function POST(request: NextRequest) {
     content,
   });
 
-  await touchChat(chatId);
-
-  const contextMessages = await getPathToRoot(userMessage.id);
+  // Run these in parallel — touchChat doesn't depend on contextMessages
+  const [, contextMessages] = await Promise.all([
+    touchChat(chatId),
+    getPathToRoot(userMessage.id),
+  ]);
 
   const llmMessages: LLMMessage[] = [
     { role: "system", content: DEFAULT_SYSTEM_PROMPT },
@@ -135,48 +137,52 @@ export async function POST(request: NextRequest) {
           )
         );
 
+        // Fire off title generation in background (non-blocking)
         const chat = await getChat(chatId);
         const needsAutoTitle = chat && chat.title === "New Chat";
+        let titlePromise: Promise<void> | null = null;
 
         if (needsAutoTitle && settings.activeProvider !== "ollama") {
-          const titleMessages: LLMMessage[] = [
-            {
-              role: "user",
-              content: `Generate a short title (3-6 words) for a conversation that starts with this message. Return only the title, no quotes or punctuation.\n\n${content}`,
-            },
-          ];
+          titlePromise = (async () => {
+            const titleMessages: LLMMessage[] = [
+              {
+                role: "user",
+                content: `Generate a short title (3-6 words) for a conversation that starts with this message. Return only the title, no quotes or punctuation.\n\n${content}`,
+              },
+            ];
 
-          let title = "";
-          try {
-            const titleProvider = await getPreviewProviderAsync(settings);
-            const r = await titleProvider.complete({
-              model: settings.previewModel,
-              messages: titleMessages,
-              temperature: 0.7,
-              maxTokens: 30,
-            });
-            title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
-          } catch {
+            let title = "";
             try {
-              const fallbackProvider = await getProviderAsync(settings.activeProvider, settings);
-              const r = await fallbackProvider.complete({
-                model: settings.activeModel,
+              const titleProvider = await getPreviewProviderAsync(settings);
+              const r = await titleProvider.complete({
+                model: settings.previewModel,
                 messages: titleMessages,
                 temperature: 0.7,
                 maxTokens: 30,
               });
               title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
-            } catch {}
-          }
+            } catch {
+              try {
+                const fallbackProvider = await getProviderAsync(settings.activeProvider, settings);
+                const r = await fallbackProvider.complete({
+                  model: settings.activeModel,
+                  messages: titleMessages,
+                  temperature: 0.7,
+                  maxTokens: 30,
+                });
+                title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
+              } catch {}
+            }
 
-          if (title) {
-            await renameChat(chatId, title);
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({ type: "title_updated", title })}\n\n`
-              )
-            );
-          }
+            if (title) {
+              await renameChat(chatId, title);
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({ type: "title_updated", title })}\n\n`
+                )
+              );
+            }
+          })();
         }
 
         let actualProvider = settings.activeProvider;
@@ -250,6 +256,11 @@ export async function POST(request: NextRequest) {
             })}\n\n`
           )
         );
+
+        // Wait for background title generation if it's still running
+        if (titlePromise) {
+          try { await titlePromise; } catch {}
+        }
 
         if (needsAutoTitle && settings.activeProvider === "ollama") {
           const titleMessages: LLMMessage[] = [
