@@ -49,9 +49,10 @@ export async function onNewExchange(
 export async function getMemoryContext(
   currentMessage: string,
   preComputedEmbedding?: { embedding: number[]; model: string },
-  userId?: string | null
+  userId?: string | null,
+  prefetchedSettings?: { memoryEnabled: boolean }
 ): Promise<string | null> {
-  const settings = await getSettingsAsync();
+  const settings = prefetchedSettings ?? await getSettingsAsync();
   if (!settings.memoryEnabled) return null;
 
   try {

@@ -16,12 +16,12 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { chatId, content, parentId, image, queryEmbedding } = body;
 
-  // Auth & rate limit check
-  const auth = await getAuthContext(request);
-  let userHasOwnKey = false;
+  // ── Phase 1: Parallel independent fetches ──────────────────────────
+  const [auth, baseSettings] = await Promise.all([
+    getAuthContext(request),
+    getSettingsAsync(),
+  ]);
 
-  // Check if logged-in user has their own API key for the active provider
-  const baseSettings = await getSettingsAsync();
   const settings = { ...baseSettings };
 
   // Vercel serverless can't reach local Ollama — fall back to a cloud provider.
@@ -41,18 +41,29 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // ── Phase 2: Parallel — user key, rate limit, memory context ───────
+  // Start memory context retrieval early (only needs auth.userId + content)
+  const preComputedEmb = queryEmbedding?.embedding && queryEmbedding?.model
+    ? { embedding: queryEmbedding.embedding as number[], model: queryEmbedding.model as string }
+    : undefined;
+  const memoryContextPromise = getMemoryContext(content, preComputedEmb, auth.userId, settings)
+    .catch((err) => {
+      console.error("[Stream] Memory context retrieval failed:", err);
+      return null;
+    });
+
+  // Resolve user API key and rate limit in parallel
+  let userHasOwnKey = false;
+
   if (auth.userId) {
     const userKey = await getUserApiKey(auth.userId, settings.activeProvider);
     if (userKey) {
       userHasOwnKey = true;
-      // Override the API key in settings with user's own key
       const keyField = `${settings.activeProvider}ApiKey` as keyof typeof settings;
       (settings as any)[keyField] = userKey;
     }
-  }
-
-  // Rate limit only applies to anonymous users (not logged-in, not using own key)
-  if (!auth.userId) {
+  } else {
+    // Rate limit only applies to anonymous users
     const ip = auth.anonId || 'unknown';
     const rateLimit = await checkRateLimit(ip);
     if (rateLimit.isLimited) {
@@ -82,6 +93,7 @@ export async function POST(request: NextRequest) {
     await incrementRateLimit(ip);
   }
 
+  // ── Phase 3: Create user message ───────────────────────────────────
   const userMessage = await createMessage({
     chatId,
     parentId: parentId || null,
@@ -89,26 +101,20 @@ export async function POST(request: NextRequest) {
     content,
   });
 
-  // Run these in parallel — touchChat doesn't depend on contextMessages
-  const [, contextMessages] = await Promise.all([
+  // ── Phase 4: Parallel — touchChat, contextMessages, await memory ───
+  const [, contextMessages, memoryContext] = await Promise.all([
     touchChat(chatId),
     getPathToRoot(userMessage.id),
+    memoryContextPromise,
   ]);
 
+  // ── Build LLM messages ─────────────────────────────────────────────
   const llmMessages: LLMMessage[] = [
     { role: "system", content: DEFAULT_SYSTEM_PROMPT },
   ];
 
-  try {
-    const preComputedEmb = queryEmbedding?.embedding && queryEmbedding?.model
-      ? { embedding: queryEmbedding.embedding as number[], model: queryEmbedding.model as string }
-      : undefined;
-    const memoryContext = await getMemoryContext(content, preComputedEmb, auth.userId);
-    if (memoryContext) {
-      llmMessages.push({ role: "system", content: memoryContext });
-    }
-  } catch (err) {
-    console.error("[Stream] Memory context retrieval failed:", err);
+  if (memoryContext) {
+    llmMessages.push({ role: "system", content: memoryContext });
   }
 
   llmMessages.push(
