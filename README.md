@@ -4,7 +4,7 @@
 
 ### A nonlinear AI notebook for the curious mind
 
-*We don't think linearly — why investigate so?*
+*We don't think linearly, why investigate so?*
 
 [![Next.js](https://img.shields.io/badge/Next.js_16-black?style=flat-square&logo=next.js)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React_19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
