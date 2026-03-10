@@ -169,13 +169,13 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function OllamaSetupGuide({ onRetry, onDisconnect }: { onRetry: () => void; onDisconnect: () => void }) {
+function OllamaSetupGuide({ onRetry, onDisconnect, error }: { onRetry: () => void; onDisconnect: () => void; error?: string | null }) {
   const [showGuide, setShowGuide] = useState(false);
 
   return (
     <div className="space-y-2">
       <p className="text-xs text-muted-foreground">
-        Ollama not detected.{" "}
+        Ollama not detected.{error && <span className="text-red-500 ml-1">({error})</span>}{" "}
         <button
           onClick={() => setShowGuide(!showGuide)}
           className="text-xs underline underline-offset-2 hover:text-foreground transition-colors"
@@ -1464,7 +1464,7 @@ export default function SettingsPage() {
                   </Button>
                 </div>
               ) : (
-                <OllamaSetupGuide onRetry={() => ollama.recheck()} onDisconnect={() => ollama.revoke()} />
+                <OllamaSetupGuide onRetry={() => ollama.recheck()} onDisconnect={() => ollama.revoke()} error={ollama.lastError} />
               )}
             </div>
           </div>
@@ -1582,7 +1582,7 @@ export default function SettingsPage() {
                         </Button>
                       </div>
                     ) : !ollama.isAvailable ? (
-                      <OllamaSetupGuide onRetry={() => ollama.recheck()} onDisconnect={() => ollama.revoke()} />
+                      <OllamaSetupGuide onRetry={() => ollama.recheck()} onDisconnect={() => ollama.revoke()} error={ollama.lastError} />
                     ) : ollamaEmbeddingModels.length === 0 ? (
                       <div className="space-y-1">
                         <p className="text-xs text-muted-foreground">
@@ -1859,3 +1859,4 @@ export default function SettingsPage() {
     </div>
   );
 }
+

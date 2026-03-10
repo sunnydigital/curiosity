@@ -13,7 +13,11 @@ export async function GET(request: NextRequest) {
 
   function getRedirectUrl(path: string) {
     if (isLocalEnv) return `${origin}${path}`;
-    if (forwardedHost) return `https://${forwardedHost}${path}`;
+    if (forwardedHost) {
+      // Always redirect to www subdomain in production
+      const host = forwardedHost.replace(/^(?!www\.)(.+\.curiosityllm\.app)$/, 'www.$1');
+      return `https://${host}${path}`;
+    }
     return `${origin}${path}`;
   }
 

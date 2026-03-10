@@ -16,12 +16,12 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { chatId, content, parentId, image, queryEmbedding } = body;
 
-  // Auth & rate limit check
-  const auth = await getAuthContext(request);
-  let userHasOwnKey = false;
+  // ── Phase 1: Parallel independent fetches ──────────────────────────
+  const [auth, baseSettings] = await Promise.all([
+    getAuthContext(request),
+    getSettingsAsync(),
+  ]);
 
-  // Check if logged-in user has their own API key for the active provider
-  const baseSettings = await getSettingsAsync();
   const settings = { ...baseSettings };
 
   // Vercel serverless can't reach local Ollama — fall back to a cloud provider.
@@ -41,18 +41,29 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // ── Phase 2: Parallel — user key, rate limit, memory context ───────
+  // Start memory context retrieval early (only needs auth.userId + content)
+  const preComputedEmb = queryEmbedding?.embedding && queryEmbedding?.model
+    ? { embedding: queryEmbedding.embedding as number[], model: queryEmbedding.model as string }
+    : undefined;
+  const memoryContextPromise = getMemoryContext(content, preComputedEmb, auth.userId, settings)
+    .catch((err) => {
+      console.error("[Stream] Memory context retrieval failed:", err);
+      return null;
+    });
+
+  // Resolve user API key and rate limit in parallel
+  let userHasOwnKey = false;
+
   if (auth.userId) {
     const userKey = await getUserApiKey(auth.userId, settings.activeProvider);
     if (userKey) {
       userHasOwnKey = true;
-      // Override the API key in settings with user's own key
       const keyField = `${settings.activeProvider}ApiKey` as keyof typeof settings;
       (settings as any)[keyField] = userKey;
     }
-  }
-
-  // Rate limit only applies to anonymous users (not logged-in, not using own key)
-  if (!auth.userId) {
+  } else {
+    // Rate limit only applies to anonymous users
     const ip = auth.anonId || 'unknown';
     const rateLimit = await checkRateLimit(ip);
     if (rateLimit.isLimited) {
@@ -82,6 +93,7 @@ export async function POST(request: NextRequest) {
     await incrementRateLimit(ip);
   }
 
+  // ── Phase 3: Create user message ───────────────────────────────────
   const userMessage = await createMessage({
     chatId,
     parentId: parentId || null,
@@ -89,24 +101,20 @@ export async function POST(request: NextRequest) {
     content,
   });
 
-  await touchChat(chatId);
+  // ── Phase 4: Parallel — touchChat, contextMessages, await memory ───
+  const [, contextMessages, memoryContext] = await Promise.all([
+    touchChat(chatId),
+    getPathToRoot(userMessage.id),
+    memoryContextPromise,
+  ]);
 
-  const contextMessages = await getPathToRoot(userMessage.id);
-
+  // ── Build LLM messages ─────────────────────────────────────────────
   const llmMessages: LLMMessage[] = [
     { role: "system", content: DEFAULT_SYSTEM_PROMPT },
   ];
 
-  try {
-    const preComputedEmb = queryEmbedding?.embedding && queryEmbedding?.model
-      ? { embedding: queryEmbedding.embedding as number[], model: queryEmbedding.model as string }
-      : undefined;
-    const memoryContext = await getMemoryContext(content, preComputedEmb, auth.userId);
-    if (memoryContext) {
-      llmMessages.push({ role: "system", content: memoryContext });
-    }
-  } catch (err) {
-    console.error("[Stream] Memory context retrieval failed:", err);
+  if (memoryContext) {
+    llmMessages.push({ role: "system", content: memoryContext });
   }
 
   llmMessages.push(
@@ -135,48 +143,52 @@ export async function POST(request: NextRequest) {
           )
         );
 
+        // Fire off title generation in background (non-blocking)
         const chat = await getChat(chatId);
         const needsAutoTitle = chat && chat.title === "New Chat";
+        let titlePromise: Promise<void> | null = null;
 
         if (needsAutoTitle && settings.activeProvider !== "ollama") {
-          const titleMessages: LLMMessage[] = [
-            {
-              role: "user",
-              content: `Generate a short title (3-6 words) for a conversation that starts with this message. Return only the title, no quotes or punctuation.\n\n${content}`,
-            },
-          ];
+          titlePromise = (async () => {
+            const titleMessages: LLMMessage[] = [
+              {
+                role: "user",
+                content: `Generate a short title (3-6 words) for a conversation that starts with this message. Return only the title, no quotes or punctuation.\n\n${content}`,
+              },
+            ];
 
-          let title = "";
-          try {
-            const titleProvider = await getPreviewProviderAsync(settings);
-            const r = await titleProvider.complete({
-              model: settings.previewModel,
-              messages: titleMessages,
-              temperature: 0.7,
-              maxTokens: 30,
-            });
-            title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
-          } catch {
+            let title = "";
             try {
-              const fallbackProvider = await getProviderAsync(settings.activeProvider, settings);
-              const r = await fallbackProvider.complete({
-                model: settings.activeModel,
+              const titleProvider = await getPreviewProviderAsync(settings);
+              const r = await titleProvider.complete({
+                model: settings.previewModel,
                 messages: titleMessages,
                 temperature: 0.7,
                 maxTokens: 30,
               });
               title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
-            } catch {}
-          }
+            } catch {
+              try {
+                const fallbackProvider = await getProviderAsync(settings.activeProvider, settings);
+                const r = await fallbackProvider.complete({
+                  model: settings.activeModel,
+                  messages: titleMessages,
+                  temperature: 0.7,
+                  maxTokens: 30,
+                });
+                title = r.content.trim().replace(/^["']|["']$/g, "").slice(0, 50);
+              } catch {}
+            }
 
-          if (title) {
-            await renameChat(chatId, title);
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({ type: "title_updated", title })}\n\n`
-              )
-            );
-          }
+            if (title) {
+              await renameChat(chatId, title);
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({ type: "title_updated", title })}\n\n`
+                )
+              );
+            }
+          })();
         }
 
         let actualProvider = settings.activeProvider;
@@ -250,6 +262,11 @@ export async function POST(request: NextRequest) {
             })}\n\n`
           )
         );
+
+        // Wait for background title generation if it's still running
+        if (titlePromise) {
+          try { await titlePromise; } catch {}
+        }
 
         if (needsAutoTitle && settings.activeProvider === "ollama") {
           const titleMessages: LLMMessage[] = [
