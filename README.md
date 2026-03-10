@@ -42,7 +42,7 @@ Every AI response is a launchpad. Highlight any text and instantly fork the conv
 
 <p align="center">
     <div>
-        <img src="https://github.com/sunnydigital/curiosity/blob/website/assets/conversation-branching.gif" alt="Tree Visualization"> 
+        <img src="https://github.com/sunnydigital/curiosity/blob/website/assets/conversation-branching.gif" alt="Conversation Branching"> 
     </div>
 </p>
 
@@ -52,7 +52,7 @@ Curiosity extracts facts from your conversations and stores them as vector embed
 
 <p align="center">
     <div>
-        <img src="https://github.com/sunnydigital/curiosity/blob/website/assets/persistent-memory.gif" alt="Tree Visualization"> 
+        <img src="https://github.com/sunnydigital/curiosity/blob/website/assets/persistent-memory.gif" alt="Persistent Memory"> 
     </div>
 </p>
 
@@ -62,7 +62,7 @@ Curate collections of knowledge entries organized by topic. Add entries manually
 
 <p align="center">
     <div>
-        <img src="https://github.com/sunnydigital/curiosity/blob/website/assets/knowledge-bases.gif" alt="Tree Visualization"> 
+        <img src="https://github.com/sunnydigital/curiosity/blob/website/assets/knowledge-base.gif" alt="Knowledge Base"> 
     </div>
 </p>
 
