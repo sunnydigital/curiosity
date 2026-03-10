@@ -26,21 +26,45 @@ Curiosity is a cloud-native AI chat environment that treats conversations as **e
 
 ## Core Concepts
 
+### Tree Visualization
+
+Your conversation isn't a flat log — it's a living graph. An interactive tree panel (powered by [React Flow](https://reactflow.dev/)) renders every message as a node and every branch as an edge. Click any node to jump there. Drag to pan, scroll to zoom, or use the minimap for orientation. Trunk nodes, branch nodes, user messages, and AI responses each have distinct visual treatments so you always know where you are.
+
+<p align="center">
+    <div>
+        <img src="https://github.com/sunnydigital/curiosity/blob/main/assets/tree-visualization.gif" alt="Tree Visualization"> 
+    </div>
+</p>
+
 ### Conversation Branching
 
 Every AI response is a launchpad. Highlight any text and instantly fork the conversation into a new branch — *"Learn More"*, *"Explain"*, or *"Get Specifics"* — or write your own custom prompt. Each branch is a first-class conversation thread, complete with its own context and history, while remaining connected to the parent trunk.
 
-### Tree Visualization
-
-Your conversation isn't a flat log — it's a living graph. An interactive tree panel (powered by [React Flow](https://reactflow.dev/)) renders every message as a node and every branch as an edge. Click any node to jump there. Drag to pan, scroll to zoom, or use the minimap for orientation. Trunk nodes, branch nodes, user messages, and AI responses each have distinct visual treatments so you always know where you are.
+<p align="center">
+    <div>
+        <img src="https://github.com/sunnydigital/curiosity/blob/main/assets/conversation-branching.gif" alt="Tree Visualization"> 
+    </div>
+</p>
 
 ### Persistent Memory
 
 Curiosity extracts facts from your conversations and stores them as vector embeddings. On future chats, semantically relevant memories surface automatically — no manual bookmarking required. Memory retrieval is governed by tunable parameters for **similarity**, **recency**, and **temporal decay**, giving you fine-grained control over what the system remembers and when it forgets.
 
+<p align="center">
+    <div>
+        <img src="https://github.com/sunnydigital/curiosity/blob/main/assets/persistent-memory.gif" alt="Tree Visualization"> 
+    </div>
+</p>
+
 ### Knowledge Bases
 
 Curate collections of knowledge entries organized by topic. Add entries manually or highlight text in any conversation and send it straight to a knowledge base. Entries are embedded and retrieved alongside memories during chat, enriching the AI's context with your curated reference material.
+
+<p align="center">
+    <div>
+        <img src="https://github.com/sunnydigital/curiosity/blob/main/assets/knowledge-bases.gif" alt="Tree Visualization"> 
+    </div>
+</p>
 
 ---
 
