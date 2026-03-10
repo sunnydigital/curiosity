@@ -10,14 +10,17 @@
 [![React](https://img.shields.io/badge/React_19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS_4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
-[![SQLite](https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://sqlite.org/)
+[![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com/)
+[![Vercel](https://img.shields.io/badge/Vercel-black?style=flat-square&logo=vercel&logoColor=white)](https://vercel.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
 </div>
 
 ---
 
-Curiosity is a locally-hosted AI chat environment that treats conversations as **explorable trees**, not disposable threads. Select any passage, branch into a new line of inquiry, and watch your understanding grow as an interactive graph. With persistent memory, multi-provider LLM support, and knowledge bases — it's designed for people who follow their curiosity wherever it leads.
+Curiosity is a cloud-native AI chat environment that treats conversations as **explorable trees**, not disposable threads. Select any passage, branch into a new line of inquiry, and watch your understanding grow as an interactive graph. With persistent memory, multi-provider LLM support, knowledge bases, and Google OAuth — it's designed for people who follow their curiosity wherever it leads.
+
+**Live at [www.curiosityllm.app](https://www.curiosityllm.app)**
 
 ---
 
@@ -115,12 +118,13 @@ Highlight any text in an AI response to reveal a floating toolbar:
 | **Framework** | Next.js 16 (App Router, Turbopack) |
 | **UI** | React 19, Radix UI, Shadcn components |
 | **Styling** | Tailwind CSS 4, CSS variables for theming |
+| **Database** | Supabase (PostgreSQL) |
+| **Auth** | Supabase Auth (Google OAuth), @mariozechner/pi-ai (LLM provider OAuth) |
+| **Hosting** | Vercel (serverless) |
 | **Graph** | @xyflow/react (React Flow) |
 | **Markdown** | react-markdown, remark-gfm, remark-math, rehype-katex |
 | **Code** | react-syntax-highlighter (Prism) |
-| **Database** | SQLite via better-sqlite3 |
-| **LLM SDKs** | OpenAI, Anthropic, Google Generative AI |
-| **Auth** | @mariozechner/pi-ai (OAuth flows) |
+| **LLM SDKs** | OpenAI, Anthropic, Google Generative AI, Ollama |
 | **Icons** | Lucide React |
 
 ---
@@ -131,6 +135,7 @@ Highlight any text in an AI response to reveal a floating toolbar:
 
 - **Node.js** 18+
 - **npm** (or your preferred package manager)
+- A **Supabase** project ([supabase.com](https://supabase.com/))
 - *(Optional)* [Ollama](https://ollama.com/) for local model inference
 
 ### Installation
@@ -143,31 +148,39 @@ cd curiosity
 # Install dependencies
 npm install
 
+# Set up environment variables
+cp .env.example .env.local
+# Edit .env.local with your Supabase credentials
+
 # Start the development server (with Turbopack)
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) and start exploring.
 
-### Configuration
-
-On first launch, Curiosity auto-generates an encryption key and saves it to `.curiosity-key`. To set your own:
-
-```bash
-# Generate a key
-openssl rand -hex 32
-
-# Add it to .env.local
-echo "CURIOSITY_ENCRYPTION_KEY=<your-key>" > .env.local
-```
-
-All API keys and OAuth tokens are **encrypted at rest** using this key. Configure providers in the Settings page — no environment variables required for API keys.
-
 ### Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `CURIOSITY_ENCRYPTION_KEY` | Optional | Encryption key for secure credential storage. Auto-generated if not set. |
+| `NEXT_PUBLIC_SUPABASE_URL` | **Yes** | Your Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Yes** | Supabase anonymous (public) key |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Yes** | Supabase service role key (server-side only) |
+
+### Database Setup
+
+Run the schema SQL in your Supabase project's SQL Editor. The schema file is included in the repository. All API keys and OAuth tokens are stored securely in the database. Configure LLM providers in the Settings page — no additional environment variables required.
+
+### Ollama (Local Models)
+
+To use locally-hosted models via Ollama, set the CORS origin to allow requests from your domain:
+
+```bash
+# macOS
+pkill ollama && OLLAMA_ORIGINS="*" ollama serve
+
+# Windows (PowerShell — then restart Ollama)
+[System.Environment]::SetEnvironmentVariable("OLLAMA_ORIGINS", "*", "User")
+```
 
 ---
 
@@ -177,19 +190,24 @@ All API keys and OAuth tokens are **encrypted at rest** using this key. Configur
 curiosity/
 ├── app/                    # Next.js App Router
 │   ├── api/                # API routes (chat, LLM streaming, memory, settings, OAuth)
+│   ├── auth/               # Auth callback (Google OAuth via Supabase)
 │   └── settings/           # Settings page
 ├── components/
+│   ├── auth/               # Auth listener, login UI
 │   ├── chat/               # Chat view, message input, text selection toolbar
+│   ├── layout/             # Sidebar, top bar (responsive mobile/desktop)
 │   ├── memory/             # Memory panel, knowledge base UI
-│   ├── sidebar/            # Sidebar, project tree, chat list
 │   ├── tree/               # Conversation tree visualization
 │   └── ui/                 # Shadcn/Radix primitives
 ├── db/
-│   ├── migrations/         # Sequential SQLite migrations (001–012)
-│   └── queries/            # Typed query modules
+│   └── queries/            # Typed Supabase query modules
+├── hooks/                  # Custom hooks (useOllama, etc.)
 ├── lib/
+│   ├── auth/               # Auth helpers, admin detection
 │   ├── llm/                # Provider implementations, embedding, failover
-│   └── memory/             # Fact extraction, memory manager, retrieval
+│   ├── memory/             # Fact extraction, memory manager, retrieval
+│   ├── oauth/              # LLM provider OAuth flows (pi-ai)
+│   └── supabase/           # Supabase client (browser, server, middleware)
 ├── types/                  # Shared TypeScript interfaces
 └── public/                 # Static assets
 ```
